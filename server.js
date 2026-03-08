@@ -2,12 +2,10 @@ require("dotenv").config();
 
 const express = require("express");
 const session = require("express-session");
-const SQLiteStoreFactory = require("connect-sqlite3");
 const bcrypt = require("bcryptjs");
 const path = require("path");
 const fs = require("fs");
 const { createClient } = require("@supabase/supabase-js");
-const Database = require("better-sqlite3");
 const { computeSummary, createWorkbook } = require("./lib/timecard-workbook");
 
 const ADMIN_NAME = "Lc tranporte";
@@ -17,56 +15,18 @@ const PORT = Number(process.env.PORT || 3000);
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const dataDir = path.join(__dirname, "data");
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
-
-const SQLiteStore = SQLiteStoreFactory(session);
 const app = express();
 let storageMode = "local";
 let supabase = null;
-let localDb = null;
-
-function initLocalDb() {
-  localDb = new Database(path.join(dataDir, "timecard.db"));
-  localDb.pragma("journal_mode = WAL");
-  localDb.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      employee_id TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('admin', 'employee')),
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS time_records (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      employee_name TEXT NOT NULL,
-      employee_id TEXT NOT NULL,
-      action TEXT NOT NULL,
-      recorded_at TEXT NOT NULL,
-      local_date TEXT NOT NULL,
-      local_time TEXT NOT NULL,
-      latitude REAL,
-      longitude REAL,
-      location_label TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id)
-    );
-  `);
-}
+let localUsers = [];
+let localRecords = [];
+let localUserSequence = 1;
+let localRecordSequence = 1;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(
   session({
-    store: new SQLiteStore({
-      db: "sessions.sqlite",
-      dir: dataDir,
-    }),
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
@@ -144,12 +104,17 @@ async function ensureAdminUser() {
     return;
   }
 
-  const admin = localDb.prepare("SELECT id FROM users WHERE employee_id = ? AND role = 'admin'").get(ADMIN_NAME);
+  const admin = localUsers.find((user) => user.employee_id === ADMIN_NAME && user.role === "admin");
   if (!admin) {
     const passwordHash = bcrypt.hashSync(ADMIN_PASSWORD, 10);
-    localDb.prepare(
-      "INSERT INTO users (name, employee_id, password_hash, role) VALUES (?, ?, ?, 'admin')"
-    ).run(ADMIN_NAME, ADMIN_NAME, passwordHash);
+    localUsers.push({
+      id: localUserSequence++,
+      name: ADMIN_NAME,
+      employee_id: ADMIN_NAME,
+      password_hash: passwordHash,
+      role: "admin",
+      created_at: new Date().toISOString(),
+    });
   }
 }
 
@@ -170,7 +135,6 @@ async function initializeStorage() {
     }
   }
 
-  initLocalDb();
   storageMode = "local";
 }
 
@@ -181,7 +145,7 @@ async function getUserByEmployeeId(employeeId) {
     );
   }
 
-  return localDb.prepare("SELECT * FROM users WHERE employee_id = ?").get(String(employeeId).trim()) || null;
+  return localUsers.find((user) => user.employee_id === String(employeeId).trim()) || null;
 }
 
 async function insertEmployeeUser(name, employeeId, passwordHash) {
@@ -200,10 +164,16 @@ async function insertEmployeeUser(name, employeeId, passwordHash) {
     );
   }
 
-  const result = localDb
-    .prepare("INSERT INTO users (name, employee_id, password_hash, role) VALUES (?, ?, ?, 'employee')")
-    .run(String(name).trim(), String(employeeId).trim(), passwordHash);
-  return localDb.prepare("SELECT * FROM users WHERE id = ?").get(result.lastInsertRowid);
+  const user = {
+    id: localUserSequence++,
+    name: String(name).trim(),
+    employee_id: String(employeeId).trim(),
+    password_hash: passwordHash,
+    role: "employee",
+    created_at: new Date().toISOString(),
+  };
+  localUsers.push(user);
+  return user;
 }
 
 async function listRecordsForUser(user) {
@@ -218,10 +188,12 @@ async function listRecordsForUser(user) {
   }
 
   if (user.role === "admin") {
-    return localDb.prepare("SELECT * FROM time_records ORDER BY recorded_at DESC").all();
+    return [...localRecords].sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at));
   }
 
-  return localDb.prepare("SELECT * FROM time_records WHERE user_id = ? ORDER BY recorded_at DESC").all(user.id);
+  return localRecords
+    .filter((record) => record.user_id === user.id)
+    .sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at));
 }
 
 async function insertRecord(user, payload) {
@@ -235,25 +207,13 @@ async function insertRecord(user, payload) {
     );
   }
 
-  const result = localDb.prepare(`
-    INSERT INTO time_records (
-      user_id, employee_name, employee_id, action, recorded_at,
-      local_date, local_time, latitude, longitude, location_label
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    payload.user_id,
-    payload.employee_name,
-    payload.employee_id,
-    payload.action,
-    payload.recorded_at,
-    payload.local_date,
-    payload.local_time,
-    payload.latitude,
-    payload.longitude,
-    payload.location_label
-  );
-
-  return localDb.prepare("SELECT * FROM time_records WHERE id = ?").get(result.lastInsertRowid);
+  const record = {
+    id: localRecordSequence++,
+    ...payload,
+    created_at: new Date().toISOString(),
+  };
+  localRecords.push(record);
+  return record;
 }
 
 async function listAllRecordsAscending() {
@@ -261,7 +221,7 @@ async function listAllRecordsAscending() {
     return runQuery(supabase.from("time_records").select("*").order("recorded_at", { ascending: true }));
   }
 
-  return localDb.prepare("SELECT * FROM time_records ORDER BY recorded_at ASC").all();
+  return [...localRecords].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
 }
 
 app.get("/api/health", (_req, res) => {
