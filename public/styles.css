@@ -1,0 +1,392 @@
+:root {
+  --bg: #edf2f7;
+  --bg-strong: #dbe7f2;
+  --surface: rgba(255, 250, 242, 0.88);
+  --surface-strong: #fffdf9;
+  --ink: #233127;
+  --muted: #607065;
+  --line: rgba(116, 90, 54, 0.18);
+  --green: #196b52;
+  --green-dark: #115540;
+  --gold: #d39b39;
+  --red: #b14e41;
+  --blue: #0b5aa8;
+  --blue-soft: #d9e8f7;
+  --shadow: 0 20px 50px rgba(69, 47, 19, 0.12);
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  position: relative;
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(11, 90, 168, 0.18), transparent 25%),
+    radial-gradient(circle at 80% 12%, rgba(211, 155, 57, 0.18), transparent 18%),
+    linear-gradient(180deg, #f7fbff 0%, var(--bg) 100%);
+}
+
+body::before {
+  content: "LC TRANSPORTES";
+  position: fixed;
+  inset: auto -120px 40px auto;
+  font-size: clamp(4.5rem, 14vw, 10rem);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: rgba(11, 90, 168, 0.05);
+  transform: rotate(-12deg);
+  pointer-events: none;
+  z-index: 0;
+}
+
+button,
+input,
+a {
+  font: inherit;
+}
+
+.shell {
+  position: relative;
+  z-index: 1;
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+.hero,
+.panel,
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  box-shadow: var(--shadow);
+}
+
+.hero {
+  padding: 28px;
+  margin-bottom: 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(240px, 360px);
+  gap: 22px;
+  align-items: center;
+  background:
+    linear-gradient(140deg, rgba(11, 90, 168, 0.12), rgba(211, 155, 57, 0.14)),
+    var(--surface);
+}
+
+.panel {
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.card {
+  padding: 20px;
+}
+
+.grid-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.stack {
+  display: grid;
+  gap: 14px;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--blue);
+}
+
+.eyebrow.small {
+  margin-bottom: 6px;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 12px;
+  font-size: clamp(2rem, 7vw, 3.4rem);
+  line-height: 0.98;
+}
+
+.lead,
+.muted,
+.record-meta,
+.feedback,
+.empty-row {
+  color: var(--muted);
+}
+
+.hero-status,
+.status {
+  width: fit-content;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--line);
+  font-weight: 600;
+}
+
+.brand-mark {
+  display: flex;
+  justify-content: center;
+}
+
+.brand-circle {
+  width: min(100%, 320px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 6px solid rgba(11, 90, 168, 0.95);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(228, 239, 247, 0.95));
+  box-shadow: inset 0 0 0 12px rgba(255, 255, 255, 0.72);
+  padding: 38px 24px 24px;
+  text-align: center;
+  display: grid;
+  align-content: center;
+}
+
+.brand-lc {
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  gap: 6px;
+  line-height: 0.8;
+  margin-bottom: 12px;
+}
+
+.brand-l,
+.brand-c {
+  display: inline-block;
+  font-weight: 900;
+  font-size: clamp(4.2rem, 10vw, 7.2rem);
+}
+
+.brand-l {
+  color: var(--blue);
+}
+
+.brand-c {
+  color: var(--gold);
+}
+
+.brand-title {
+  margin-bottom: 8px;
+  color: var(--blue);
+  font-size: clamp(1.2rem, 3.2vw, 2.1rem);
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+.brand-copy {
+  margin-bottom: 4px;
+  color: var(--blue);
+  font-size: clamp(0.85rem, 2.4vw, 1.1rem);
+  font-weight: 600;
+}
+
+.brand-copy.light {
+  color: #377ab8;
+}
+
+label {
+  display: grid;
+  gap: 8px;
+  font-weight: 600;
+}
+
+input {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+input:focus {
+  outline: 2px solid rgba(25, 107, 82, 0.18);
+  border-color: var(--green);
+}
+
+button,
+.ghost {
+  border-radius: 18px;
+  padding: 14px 16px;
+  text-decoration: none;
+  transition: transform 0.16s ease, opacity 0.16s ease, background 0.16s ease;
+  cursor: pointer;
+}
+
+button:hover,
+.ghost:hover {
+  transform: translateY(-1px);
+}
+
+.primary,
+.secondary,
+.danger,
+.lunch {
+  border: none;
+  color: #fff;
+  font-weight: 700;
+}
+
+.primary {
+  background: var(--green);
+}
+
+.secondary {
+  background: #2a7b63;
+}
+
+.lunch {
+  background: var(--gold);
+}
+
+.danger {
+  background: var(--red);
+}
+
+.ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 252, 245, 0.85);
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+
+.topbar,
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.export-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.button-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.action-button {
+  min-height: 76px;
+}
+
+.records {
+  display: grid;
+  gap: 12px;
+}
+
+.record-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 15px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+}
+
+.record-title {
+  margin-bottom: 6px;
+}
+
+.record-action {
+  padding: 10px 12px;
+  border-radius: 999px;
+  background: rgba(25, 107, 82, 0.1);
+  color: var(--green-dark);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.feedback {
+  min-height: 24px;
+  margin: 14px 6px 0;
+  font-weight: 600;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  white-space: nowrap;
+  padding: 13px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+th {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.empty-row {
+  text-align: center;
+}
+
+.hidden {
+  display: none;
+}
+
+@media (max-width: 780px) {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+
+  .grid-two,
+  .button-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar,
+  .section-head,
+  .record-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .export-actions {
+    width: 100%;
+  }
+
+  .record-action {
+    width: fit-content;
+  }
+
+  .brand-circle {
+    width: min(100%, 260px);
+  }
+}
