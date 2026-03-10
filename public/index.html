@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LC Transporte | Cartao de Ponto</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">LC Transporte</p>
+        <h1>Cartao de ponto profissional</h1>
+        <p class="lead">
+          Plataforma mobile para registrar jornada, armazenar dados centralizados e permitir auditoria completa do administrador.
+        </p>
+      </div>
+      <div class="brand-mark" aria-hidden="true">
+        <div class="brand-circle">
+          <div class="brand-lc">
+            <span class="brand-l">L</span>
+            <span class="brand-c">C</span>
+          </div>
+          <p class="brand-title">TRANSPORTES</p>
+          <p class="brand-copy">Coletas &amp; Entregas Urgentes</p>
+          <p class="brand-copy light">Regional e Interestadual</p>
+        </div>
+      </div>
+      <div class="hero-status" id="clockStatus">Carregando horario...</div>
+    </section>
+
+    <section class="panel auth-panel" id="authPanel">
+      <article class="card auth-card">
+        <h2>Entrar</h2>
+        <p class="muted">Funcionario e administrador entram com usuario e senha.</p>
+        <form id="loginForm" class="stack">
+          <label>
+            Usuario ou matricula
+            <input id="loginEmployeeId" type="text" placeholder="Ex.: 1024 ou Lc transporte" required>
+          </label>
+          <label>
+            Senha
+            <input id="loginPassword" type="password" placeholder="Digite a senha" required>
+          </label>
+          <button type="submit" class="primary">Entrar</button>
+        </form>
+      </article>
+      <p class="feedback" id="authMessage"></p>
+    </section>
+
+    <section class="panel hidden" id="appPanel">
+      <div class="topbar">
+        <div>
+          <p class="eyebrow small">Sessao ativa</p>
+          <h2 id="sessionTitle">Carregando...</h2>
+          <p class="muted" id="sessionSubtitle"></p>
+        </div>
+        <button class="ghost" id="logoutButton">Sair</button>
+      </div>
+
+      <section class="card hidden" id="employeePanel">
+        <div class="section-head">
+          <div>
+            <h3>Registrar ponto</h3>
+            <p class="muted">Os registros ficam centralizados no sistema e vinculados ao funcionario autenticado.</p>
+          </div>
+          <span class="status" id="locationStatus">Aguardando acao.</span>
+        </div>
+        <div class="button-grid">
+          <button class="primary action-button" data-action="Entrada">Inicio</button>
+          <button class="lunch action-button" data-action="Saida para almoco">Almoco</button>
+          <button class="lunch action-button" data-action="Retorno do almoco">Termino do almoco</button>
+          <button class="danger action-button" data-action="Saida">Termino</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <h3 id="recordsTitle">Registros</h3>
+            <p class="muted" id="recordsSubtitle"></p>
+          </div>
+          <div class="export-actions hidden" id="exportActions">
+            <button type="button" class="ghost" id="toggleFilterButton">Mostrar filtro</button>
+            <a class="ghost" id="exportXlsxLink" href="/api/admin/export.xlsx">Baixar planilha XLSX</a>
+            <a class="ghost" id="exportCsvLink" href="/api/admin/export.csv">Baixar CSV</a>
+          </div>
+        </div>
+        <div class="filter-panel hidden" id="recordsFilterPanel">
+          <label class="filter-label" for="employeeFilter">
+            Filtrar por matricula
+            <select id="employeeFilter">
+              <option value="">Todas as matriculas</option>
+            </select>
+          </label>
+        </div>
+        <div class="records" id="recordsList"></div>
+      </section>
+
+      <section class="card hidden" id="adminPanel">
+        <div class="section-head">
+          <div>
+            <h3>Resumo administrativo</h3>
+            <p class="muted">Visao consolidada de todos os funcionarios por dia.</p>
+          </div>
+        </div>
+        <div class="admin-grid">
+          <article class="admin-block">
+            <h4>Cadastrar funcionario</h4>
+            <p class="muted">Somente o administrador pode criar novos acessos de funcionario.</p>
+            <form id="registerForm" class="stack">
+              <label>
+                Nome completo
+                <input id="registerName" type="text" placeholder="Ex.: Joao Silva" required>
+              </label>
+              <label>
+                Matricula
+                <input id="registerEmployeeId" type="text" placeholder="Ex.: 1024" required>
+              </label>
+              <label>
+                Senha
+                <input id="registerPassword" type="password" placeholder="Crie uma senha" required>
+              </label>
+              <button type="submit" class="secondary">Cadastrar funcionario</button>
+            </form>
+          </article>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Funcionario</th>
+                <th>Matricula</th>
+                <th>Dia</th>
+                <th>Entrada</th>
+                <th>Saida almoco</th>
+                <th>Retorno almoco</th>
+                <th>Saida</th>
+                <th>Horas</th>
+              </tr>
+            </thead>
+            <tbody id="summaryBody">
+              <tr>
+                <td colspan="8" class="empty-row">Nenhum dado carregado.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <template id="recordTemplate">
+    <article class="record-card">
+      <div>
+        <h4 class="record-title"></h4>
+        <p class="record-meta"></p>
+        <a class="record-map-link hidden" target="_blank" rel="noopener noreferrer">Ver no Google Maps</a>
+      </div>
+      <span class="record-action"></span>
+    </article>
+  </template>
+
+  <script src="/app.js"></script>
+</body>
+</html>

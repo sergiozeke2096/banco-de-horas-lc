@@ -1,0 +1,26 @@
+{
+  "name": "codex",
+  "version": "1.0.0",
+  "description": "Sistema profissional de cartao de ponto mobile com painel administrativo.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "echo \"Sem testes automatizados configurados\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.98.0",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.3.1",
+    "exceljs": "^4.4.0",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0"
+  }
+}
