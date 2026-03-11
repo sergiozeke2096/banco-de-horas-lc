@@ -31,43 +31,21 @@
     </section>
 
     <section class="panel auth-panel" id="authPanel">
-      <div class="grid-two">
-        <article class="card">
-          <h2>Entrar</h2>
-          <p class="muted">Funcionario e administrador entram com usuario e senha.</p>
-          <form id="loginForm" class="stack">
-            <label>
-              Usuario ou matricula
-              <input id="loginEmployeeId" type="text" placeholder="Ex.: 1024 ou Lc tranporte" required>
-            </label>
-            <label>
-              Senha
-              <input id="loginPassword" type="password" placeholder="Digite a senha" required>
-            </label>
-            <button type="submit" class="primary">Entrar</button>
-          </form>
-        </article>
-
-        <article class="card">
-          <h2>Cadastrar funcionario</h2>
-          <p class="muted">Crie um acesso individual para cada funcionario.</p>
-          <form id="registerForm" class="stack">
-            <label>
-              Nome completo
-              <input id="registerName" type="text" placeholder="Ex.: Joao Silva" required>
-            </label>
-            <label>
-              Matricula
-              <input id="registerEmployeeId" type="text" placeholder="Ex.: 1024" required>
-            </label>
-            <label>
-              Senha
-              <input id="registerPassword" type="password" placeholder="Crie uma senha" required>
-            </label>
-            <button type="submit" class="secondary">Cadastrar</button>
-          </form>
-        </article>
-      </div>
+      <article class="card auth-card">
+        <h2>Entrar</h2>
+        <p class="muted">Funcionario e administrador entram com usuario e senha.</p>
+        <form id="loginForm" class="stack">
+          <label>
+            Usuario ou matricula
+            <input id="loginEmployeeId" type="text" placeholder="Ex.: 1024 ou Lc transporte" required>
+          </label>
+          <label>
+            Senha
+            <input id="loginPassword" type="password" placeholder="Digite a senha" required>
+          </label>
+          <button type="submit" class="primary">Entrar</button>
+        </form>
+      </article>
       <p class="feedback" id="authMessage"></p>
     </section>
 
@@ -104,9 +82,17 @@
             <p class="muted" id="recordsSubtitle"></p>
           </div>
           <div class="export-actions hidden" id="exportActions">
+            <button type="button" class="ghost" id="toggleFilterButton">Mostrar filtro</button>
             <a class="ghost" id="exportXlsxLink" href="/api/admin/export.xlsx">Baixar planilha XLSX</a>
-            <a class="ghost" id="exportCsvLink" href="/api/admin/export.csv">Baixar CSV</a>
           </div>
+        </div>
+        <div class="filter-panel hidden" id="recordsFilterPanel">
+          <label class="filter-label" for="employeeFilter">
+            Filtrar por matricula
+            <select id="employeeFilter">
+              <option value="">Todas as matriculas</option>
+            </select>
+          </label>
         </div>
         <div class="records" id="recordsList"></div>
       </section>
@@ -118,23 +104,48 @@
             <p class="muted">Visao consolidada de todos os funcionarios por dia.</p>
           </div>
         </div>
+        <div class="admin-grid">
+          <article class="admin-block">
+            <div class="admin-block-head">
+              <div>
+                <h4>Cadastrar funcionario</h4>
+                <p class="muted">Somente o administrador pode criar novos acessos de funcionario.</p>
+              </div>
+              <button type="button" class="secondary" id="toggleRegisterButton">Novo cadastro</button>
+            </div>
+            <form id="registerForm" class="stack hidden">
+              <label>
+                Nome completo
+                <input id="registerName" type="text" placeholder="Ex.: Joao Silva" required>
+              </label>
+              <label>
+                Matricula
+                <input id="registerEmployeeId" type="text" placeholder="Ex.: 1024" required>
+              </label>
+              <label>
+                Senha
+                <input id="registerPassword" type="password" placeholder="Crie uma senha" required>
+              </label>
+              <button type="submit" class="secondary">Cadastrar funcionario</button>
+            </form>
+          </article>
+        </div>
         <div class="table-wrap">
-          <table>
+          <table class="summary-table">
             <thead>
               <tr>
                 <th>Funcionario</th>
-                <th>Matricula</th>
                 <th>Dia</th>
-                <th>Entrada</th>
-                <th>Saida almoco</th>
-                <th>Retorno almoco</th>
-                <th>Saida</th>
-                <th>Horas</th>
+                <th>Veiculo</th>
+                <th>Total de KM</th>
+                <th>Total de horas</th>
+                <th>Horas extras</th>
+                <th>Total de intervalo</th>
               </tr>
             </thead>
             <tbody id="summaryBody">
               <tr>
-                <td colspan="8" class="empty-row">Nenhum dado carregado.</td>
+                <td colspan="7" class="empty-row">Nenhum dado carregado.</td>
               </tr>
             </tbody>
           </table>
@@ -148,10 +159,35 @@
       <div>
         <h4 class="record-title"></h4>
         <p class="record-meta"></p>
+        <p class="record-vehicle"></p>
+        <a class="record-map-link hidden" target="_blank" rel="noopener noreferrer">Ver no Google Maps</a>
       </div>
       <span class="record-action"></span>
     </article>
   </template>
+
+  <dialog class="vehicle-dialog" id="vehicleDialog">
+    <form class="vehicle-form" id="vehicleForm" method="dialog">
+      <div>
+        <p class="eyebrow small">Dados do veiculo</p>
+        <h3>Complete antes de registrar o ponto</h3>
+        <p class="muted">Informe a placa e o KM atual do veiculo utilizado.</p>
+      </div>
+      <label>
+        Placa do veiculo
+        <input id="vehiclePlateInput" type="text" placeholder="Ex.: ABC1D23" maxlength="12" required>
+      </label>
+      <label>
+        KM atual
+        <input id="vehicleKmInput" type="number" min="0" step="0.1" placeholder="Ex.: 125430" required>
+      </label>
+      <p class="feedback vehicle-feedback" id="vehicleFormMessage"></p>
+      <div class="dialog-actions">
+        <button type="button" class="ghost" id="vehicleCancelButton">Cancelar</button>
+        <button type="submit" class="primary">Salvar e registrar</button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="/app.js"></script>
 </body>

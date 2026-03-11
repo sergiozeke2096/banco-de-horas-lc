@@ -12,7 +12,7 @@ Sistema web mobile-first com:
 
 ## Credenciais do administrador
 
-- usuario: `Lc tranporte`
+- usuario: `Lc transporte`
 - senha: `2096`
 
 ## Configurar no Supabase
@@ -90,7 +90,7 @@ Observacoes:
 
 ### Administrador
 
-1. Entra com `Lc tranporte` / `2096`.
+1. Entra com `Lc transporte` / `2096`.
 2. Ve todos os registros do sistema.
 3. Ve resumo consolidado por dia.
 4. Exporta CSV completo com rodape explicativo.

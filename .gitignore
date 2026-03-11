@@ -4,3 +4,6 @@ data
 .env
 artifacts
 novo app
+*.zip
+banco de horas/
+banco-de-horas/
