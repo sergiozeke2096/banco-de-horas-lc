@@ -434,11 +434,15 @@ app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
     return res.status(403).json({ error: "Somente funcionarios registram ponto." });
   }
 
-  const { action, latitude, longitude, locationLabel, recordedAt, localDate, localTime } = req.body;
+  const { action, latitude, longitude, locationLabel, recordedAt, localDate, localTime, vehiclePlate, vehicleKm } = req.body;
   const allowedActions = ["Entrada", "Saida para almoco", "Retorno do almoco", "Saida"];
 
   if (!allowedActions.includes(action)) {
     return res.status(400).json({ error: "Acao de ponto invalida." });
+  }
+
+  if (!vehiclePlate || vehicleKm === undefined || vehicleKm === null || Number.isNaN(Number(vehicleKm))) {
+    return res.status(400).json({ error: "Informe a placa e o KM do veiculo." });
   }
 
   const timestamp = recordedAt || new Date().toISOString();
@@ -456,6 +460,8 @@ app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
     latitude: typeof latitude === "number" ? latitude : null,
     longitude: typeof longitude === "number" ? longitude : null,
     location_label: locationLabel || "Localizacao nao informada",
+    vehicle_plate: String(vehiclePlate).trim().toUpperCase(),
+    vehicle_km: Number(vehicleKm),
   });
 
   return res.status(201).json({ record });
@@ -467,11 +473,15 @@ app.get("/api/admin/summary", requireAdmin, asyncRoute(async (_req, res) => {
     employeeName: item.employeeName,
     employeeId: item.employeeId,
     localDate: item.day,
-    entry: item.entry,
-    lunchStart: item.lunchStart,
-    lunchEnd: item.lunchEnd,
-    exit: item.exit,
+    vehiclePlate: item.vehiclePlate,
+    intervalHours: item.interval,
     workedHours: item.worked,
+    overtimeHours: item.overtime,
+    dailyKm: item.dailyKm,
+    entries: item.entries,
+    lunchStarts: item.lunchStarts,
+    lunchEnds: item.lunchEnds,
+    exits: item.exits,
   }));
   return res.json({ summary });
 }));
@@ -490,6 +500,8 @@ app.get("/api/admin/export.csv", requireAdmin, asyncRoute(async (_req, res) => {
       "Latitude",
       "Longitude",
       "Localizacao aproximada",
+      "Placa do veiculo",
+      "KM do veiculo",
       "Google Maps",
     ],
     ...rows.map((row) => [
@@ -502,6 +514,8 @@ app.get("/api/admin/export.csv", requireAdmin, asyncRoute(async (_req, res) => {
       row.latitude ?? "",
       row.longitude ?? "",
       row.location_label ?? "",
+      row.vehicle_plate ?? "",
+      row.vehicle_km ?? "",
       createMapsUrl(row),
     ]),
     [],
@@ -515,6 +529,8 @@ app.get("/api/admin/export.csv", requireAdmin, asyncRoute(async (_req, res) => {
     ["Latitude", "Latitude obtida no celular"],
     ["Longitude", "Longitude obtida no celular"],
     ["Localizacao aproximada", "Descricao curta da localizacao armazenada"],
+    ["Placa do veiculo", "Placa informada pelo funcionario ao registrar o ponto"],
+    ["KM do veiculo", "Quilometragem informada no momento do registro"],
     ["Google Maps", "Link direto para abrir a coordenada registrada no Google Maps"],
   ];
 

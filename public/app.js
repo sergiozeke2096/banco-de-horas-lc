@@ -4,6 +4,7 @@ const state = {
   summary: [],
   selectedEmployeeId: "",
   showEmployeeFilter: false,
+  showRegisterForm: false,
 };
 
 const formatters = {
@@ -32,8 +33,17 @@ const employeeFilter = document.querySelector("#employeeFilter");
 const recordTemplate = document.querySelector("#recordTemplate");
 const loginForm = document.querySelector("#loginForm");
 const registerForm = document.querySelector("#registerForm");
+const toggleRegisterButton = document.querySelector("#toggleRegisterButton");
 const logoutButton = document.querySelector("#logoutButton");
+const vehicleDialog = document.querySelector("#vehicleDialog");
+const vehicleForm = document.querySelector("#vehicleForm");
+const vehiclePlateInput = document.querySelector("#vehiclePlateInput");
+const vehicleKmInput = document.querySelector("#vehicleKmInput");
+const vehicleFormMessage = document.querySelector("#vehicleFormMessage");
+const vehicleCancelButton = document.querySelector("#vehicleCancelButton");
 const actionButtons = [...document.querySelectorAll(".action-button")];
+let vehicleDialogResolver = null;
+const MAX_ACTION_SLOTS = 5;
 
 function setMessage(message, isError = false) {
   authMessage.textContent = message;
@@ -79,6 +89,12 @@ function formatLocation(record) {
   return "Localizacao nao informada";
 }
 
+function formatVehicle(record) {
+  const vehiclePlate = record.vehicle_plate ? String(record.vehicle_plate).toUpperCase() : "Nao informado";
+  const vehicleKm = record.vehicle_km ?? "Nao informado";
+  return `Veiculo: ${vehiclePlate} - KM: ${vehicleKm}`;
+}
+
 function createMapsUrl(record) {
   if (typeof record.latitude !== "number" || typeof record.longitude !== "number") {
     return "";
@@ -115,6 +131,7 @@ function renderRecords() {
     node.querySelector(".record-title").textContent = title;
     node.querySelector(".record-meta").textContent =
       `${formatters.datetime.format(new Date(record.recorded_at))} - ${formatLocation(record)}`;
+    node.querySelector(".record-vehicle").textContent = formatVehicle(record);
     if (mapsUrl) {
       const mapLink = node.querySelector(".record-map-link");
       mapLink.href = mapsUrl;
@@ -154,25 +171,59 @@ function renderEmployeeFilter() {
   state.selectedEmployeeId = employeeFilter.value;
 }
 
+function renderRegisterForm() {
+  const isAdmin = state.user?.role === "admin";
+
+  if (!isAdmin) {
+    state.showRegisterForm = false;
+    registerForm.classList.add("hidden");
+    return;
+  }
+
+  registerForm.classList.toggle("hidden", !state.showRegisterForm);
+  toggleRegisterButton.textContent = state.showRegisterForm ? "Ocultar cadastro" : "Novo cadastro";
+}
+
 function renderSummary() {
   summaryBody.innerHTML = "";
   if (!state.summary.length) {
-    summaryBody.innerHTML = '<tr><td colspan="8" class="empty-row">Nenhum resumo disponivel.</td></tr>';
+    summaryBody.innerHTML = '<tr><td colspan="7" class="empty-row">Nenhum resumo disponivel.</td></tr>';
     return;
   }
 
   for (const item of state.summary) {
     const row = document.createElement("tr");
+    const hasOvertime = item.overtimeHours && item.overtimeHours !== "00:00";
+    const overtimeClass = hasOvertime ? "summary-badge overtime" : "summary-badge neutral";
+    const intervalClass = item.intervalHours && item.intervalHours !== "00:00" ? "summary-badge interval" : "summary-badge neutral";
+    const kmClass = item.dailyKm !== "" && item.dailyKm !== null ? "summary-badge km" : "summary-badge neutral";
+
     row.innerHTML = `
-      <td>${item.employeeName}</td>
-      <td>${item.employeeId}</td>
-      <td>${item.localDate}</td>
-      <td>${item.entry || "-"}</td>
-      <td>${item.lunchStart || "-"}</td>
-      <td>${item.lunchEnd || "-"}</td>
-      <td>${item.exit || "-"}</td>
-      <td>${item.workedHours}</td>
+      <td>
+        <div class="summary-main">${item.employeeName}</div>
+      </td>
+      <td>
+        <span class="summary-date">${item.localDate}</span>
+      </td>
+      <td>
+        <span class="summary-vehicle">${item.vehiclePlate || "-"}</span>
+      </td>
+      <td>
+        <span class="${kmClass}">${item.dailyKm === "" ? "0" : item.dailyKm}</span>
+      </td>
+      <td>
+        <span class="summary-total">${item.workedHours}</span>
+      </td>
+      <td>
+        <span class="${overtimeClass}">${item.overtimeHours || "00:00"}</span>
+      </td>
+      <td>
+        <span class="${intervalClass}">${item.intervalHours || "00:00"}</span>
+      </td>
     `;
+    if (hasOvertime) {
+      row.classList.add("summary-row-overtime");
+    }
     summaryBody.appendChild(row);
   }
 }
@@ -203,6 +254,7 @@ function renderSession() {
     : "Somente os registros da sua conta aparecem aqui.";
 
   renderEmployeeFilter();
+  renderRegisterForm();
   renderRecords();
   renderSummary();
 }
@@ -277,6 +329,17 @@ async function getBestCurrentPosition() {
   return firstAttempt;
 }
 
+function collectVehicleInfo() {
+  vehicleForm.reset();
+  vehicleFormMessage.textContent = "";
+
+  return new Promise((resolve) => {
+    vehicleDialogResolver = resolve;
+    vehicleDialog.showModal();
+    vehiclePlateInput.focus();
+  });
+}
+
 async function handleRegister(event) {
   event.preventDefault();
   const payload = {
@@ -293,6 +356,8 @@ async function handleRegister(event) {
     locationStatus.textContent = `Funcionario ${data.user.name} cadastrado com sucesso.`;
     setMessage("");
     registerForm.reset();
+    state.showRegisterForm = false;
+    renderRegisterForm();
     await loadRecords();
     await loadSummary();
   } catch (error) {
@@ -327,6 +392,7 @@ async function handleLogout() {
   state.summary = [];
   state.selectedEmployeeId = "";
   state.showEmployeeFilter = false;
+  state.showRegisterForm = false;
   renderSession();
   setMessage("Sessao encerrada com sucesso.");
 }
@@ -349,7 +415,68 @@ function handleEmployeeFilterChange() {
   renderRecords();
 }
 
+function handleToggleRegisterForm() {
+  if (state.user?.role !== "admin") {
+    return;
+  }
+
+  state.showRegisterForm = !state.showRegisterForm;
+  renderRegisterForm();
+}
+
+function handleVehicleSubmit(event) {
+  event.preventDefault();
+
+  const vehiclePlate = vehiclePlateInput.value.trim().toUpperCase();
+  const vehicleKm = vehicleKmInput.value.trim();
+
+  if (!vehiclePlate || !vehicleKm) {
+    vehicleFormMessage.textContent = "Informe a placa e o KM do veiculo.";
+    return;
+  }
+
+  if (Number.isNaN(Number(vehicleKm)) || Number(vehicleKm) < 0) {
+    vehicleFormMessage.textContent = "Informe um KM valido.";
+    return;
+  }
+
+  const resolve = vehicleDialogResolver;
+  vehicleDialogResolver = null;
+  vehicleDialog.close();
+  if (resolve) {
+    resolve({
+      vehiclePlate,
+      vehicleKm: Number(vehicleKm),
+    });
+  }
+}
+
+function handleVehicleCancel() {
+  const resolve = vehicleDialogResolver;
+  vehicleDialogResolver = null;
+  vehicleDialog.close();
+  if (resolve) {
+    resolve(null);
+  }
+}
+
+function handleVehicleDialogClose() {
+  if (!vehicleDialogResolver) {
+    return;
+  }
+
+  const resolve = vehicleDialogResolver;
+  vehicleDialogResolver = null;
+  resolve(null);
+}
+
 async function registerPoint(action) {
+  const vehicleInfo = await collectVehicleInfo();
+  if (!vehicleInfo) {
+    locationStatus.textContent = "Registro cancelado.";
+    return;
+  }
+
   locationStatus.textContent = "Capturando horario e localizacao...";
   const now = new Date();
   let latitude = null;
@@ -380,6 +507,8 @@ async function registerPoint(action) {
         latitude,
         longitude,
         locationLabel,
+        vehiclePlate: vehicleInfo.vehiclePlate,
+        vehicleKm: vehicleInfo.vehicleKm,
       }),
     });
     locationStatus.textContent = "Ponto registrado com sucesso.";
@@ -393,7 +522,12 @@ loginForm.addEventListener("submit", handleLogin);
 registerForm.addEventListener("submit", handleRegister);
 logoutButton.addEventListener("click", handleLogout);
 toggleFilterButton.addEventListener("click", handleToggleFilter);
+toggleRegisterButton.addEventListener("click", handleToggleRegisterForm);
 employeeFilter.addEventListener("change", handleEmployeeFilterChange);
+vehicleForm.addEventListener("submit", handleVehicleSubmit);
+vehicleCancelButton.addEventListener("click", handleVehicleCancel);
+vehicleDialog.addEventListener("cancel", handleVehicleCancel);
+vehicleDialog.addEventListener("close", handleVehicleDialogClose);
 actionButtons.forEach((button) => {
   button.addEventListener("click", () => registerPoint(button.dataset.action));
 });
