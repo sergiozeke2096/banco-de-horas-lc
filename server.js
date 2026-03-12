@@ -7,13 +7,9 @@ const path = require("path");
 const { createClient } = require("@supabase/supabase-js");
 const { computeSummary, createWorkbook } = require("./lib/timecard-workbook");
 
-const ADMIN_NAME = "Lc transporte";
 const LEGACY_ADMIN_NAME = "Lc tranporte";
-const ADMIN_PASSWORD = "2096";
 const SESSION_SECRET = process.env.SESSION_SECRET || "timecard-professional-secret";
 const PORT = Number(process.env.PORT || 3000);
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const AUTH_COOKIE_NAME = "lc_transportes_auth";
 const AUTH_DURATION_MS = 1000 * 60 * 60 * 12;
 
@@ -22,13 +18,21 @@ let storageMode = "local";
 let supabase = null;
 let localUsers = [];
 let localRecords = [];
+let localVehicles = [];
 let localUserSequence = 1;
 let localRecordSequence = 1;
+let localVehicleSequence = 1;
 let initializationPromise = null;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(path.join(__dirname, "public"), {
+  etag: false,
+  maxAge: 0,
+  setHeaders(res) {
+    res.setHeader("Cache-Control", "no-store");
+  },
+}));
 
 function serializeUser(user) {
   return {
@@ -39,11 +43,68 @@ function serializeUser(user) {
   };
 }
 
+function serializeManagedEmployee(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    employeeId: user.employee_id,
+    role: user.role,
+    createdAt: user.created_at,
+  };
+}
+
+function serializeVehicle(vehicle) {
+  return {
+    id: vehicle.id,
+    plate: vehicle.plate,
+    description: vehicle.description || "",
+    initialKm: vehicle.initial_km ?? 0,
+    currentKm: vehicle.current_km ?? 0,
+    createdAt: vehicle.created_at,
+  };
+}
+
+function isSameEntityId(left, right) {
+  return String(left) === String(right);
+}
+
 function requireAuth(req, res, next) {
   if (!req.authUser) {
     return res.status(401).json({ error: "Autenticacao obrigatoria." });
   }
   return next();
+}
+
+function getAdminConfig() {
+  return {
+    name: String(process.env.ADMIN_NAME || "").trim(),
+    password: String(process.env.ADMIN_PASSWORD || ""),
+  };
+}
+
+function allowLocalStorageFallback() {
+  if (process.env.ALLOW_LOCAL_STORAGE_FALLBACK === undefined) {
+    return process.env.NODE_ENV !== "production";
+  }
+
+  return process.env.ALLOW_LOCAL_STORAGE_FALLBACK === "true";
+}
+
+function ensureRuntimeConfig() {
+  const missing = [];
+  const admin = getAdminConfig();
+
+  if (!admin.name) {
+    missing.push("ADMIN_NAME");
+  }
+
+  if (!admin.password) {
+    missing.push("ADMIN_PASSWORD");
+  }
+
+  if (missing.length) {
+    throw new Error(`Configuracao obrigatoria ausente: ${missing.join(", ")}.`);
+  }
 }
 
 function requireAdmin(req, res, next) {
@@ -67,12 +128,118 @@ function asyncRoute(handler) {
   };
 }
 
-function createMapsUrl(record) {
-  if (typeof record.latitude !== "number" || typeof record.longitude !== "number") {
-    return "";
+function parseDateInput(value) {
+  const match = String(value || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return null;
   }
 
-  return `https://www.google.com/maps/search/?api=1&query=${record.latitude},${record.longitude}`;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function parseLocalDate(value) {
+  const match = String(value || "").trim().match(/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/);
+  if (!match) {
+    return null;
+  }
+
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const parsedYear = Number(match[3]);
+  const year = parsedYear < 100 ? 2000 + parsedYear : parsedYear;
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function normalizeAdminFilters(query = {}) {
+  const employeeId = String(query.employeeId || "").trim();
+  const vehiclePlate = String(query.vehiclePlate || "").trim().toUpperCase();
+  const dateFrom = String(query.dateFrom || "").trim();
+  const dateTo = String(query.dateTo || "").trim();
+
+  const fromDate = dateFrom ? parseDateInput(dateFrom) : null;
+  const toDate = dateTo ? parseDateInput(dateTo) : null;
+
+  if (dateFrom && !fromDate) {
+    throw new Error("Filtro dateFrom invalido. Use o formato YYYY-MM-DD.");
+  }
+
+  if (dateTo && !toDate) {
+    throw new Error("Filtro dateTo invalido. Use o formato YYYY-MM-DD.");
+  }
+
+  if (fromDate && toDate && fromDate.getTime() > toDate.getTime()) {
+    throw new Error("Filtro de periodo invalido. dateFrom deve ser anterior ou igual a dateTo.");
+  }
+
+  return {
+    employeeId,
+    vehiclePlate,
+    dateFrom,
+    dateTo,
+    fromDate,
+    toDate,
+  };
+}
+
+function resolveRecordFilterDate(record) {
+  return parseLocalDate(record.local_date) || new Date(record.recorded_at);
+}
+
+function matchesRecordFilters(record, filters = {}) {
+  if (filters.employeeId && String(record.employee_id || "").trim() !== filters.employeeId) {
+    return false;
+  }
+
+  if (filters.vehiclePlate && String(record.vehicle_plate || "").trim().toUpperCase() !== filters.vehiclePlate) {
+    return false;
+  }
+
+  if (filters.fromDate || filters.toDate) {
+    const recordDate = resolveRecordFilterDate(record);
+    if (Number.isNaN(recordDate.getTime())) {
+      return false;
+    }
+
+    if (filters.fromDate && recordDate.getTime() < filters.fromDate.getTime()) {
+      return false;
+    }
+
+    if (filters.toDate && recordDate.getTime() > filters.toDate.getTime()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function applyRecordFilters(records, filters) {
+  return records.filter((record) => matchesRecordFilters(record, filters));
+}
+
+function buildFilterQueryString(filters) {
+  const params = new URLSearchParams();
+
+  if (filters.employeeId) {
+    params.set("employeeId", filters.employeeId);
+  }
+
+  if (filters.vehiclePlate) {
+    params.set("vehiclePlate", filters.vehiclePlate);
+  }
+
+  if (filters.dateFrom) {
+    params.set("dateFrom", filters.dateFrom);
+  }
+
+  if (filters.dateTo) {
+    params.set("dateTo", filters.dateTo);
+  }
+
+  const queryString = params.toString();
+  return queryString ? `?${queryString}` : "";
 }
 
 function createAuthCookieValue(user) {
@@ -151,6 +318,7 @@ function clearAuthCookie(res) {
 function ensureInitialized() {
   if (!initializationPromise) {
     initializationPromise = (async () => {
+      ensureRuntimeConfig();
       await initializeStorage();
       await ensureAdminUser();
     })().catch((error) => {
@@ -173,33 +341,45 @@ app.use(asyncRoute(async (_req, _res, next) => {
   next();
 }));
 
+app.use(asyncRoute(async (req, _res, next) => {
+  if (!req.authUser?.id) {
+    next();
+    return;
+  }
+
+  const currentUser = await getUserById(req.authUser.id);
+  req.authUser = currentUser ? serializeUser(currentUser) : null;
+  next();
+}));
+
 async function ensureAdminUser() {
-  const passwordHash = bcrypt.hashSync(ADMIN_PASSWORD, 10);
+  const adminConfig = getAdminConfig();
+  const passwordHash = bcrypt.hashSync(adminConfig.password, 10);
 
   if (storageMode === "supabase") {
-    const admin = await runQuery(
+    const adminUser = await runQuery(
       supabase
         .from("users")
         .select("id, name, employee_id, password_hash")
-        .eq("employee_id", ADMIN_NAME)
+        .eq("employee_id", adminConfig.name)
         .eq("role", "admin")
         .maybeSingle()
     );
 
-    if (admin) {
-      const shouldUpdatePassword = !bcrypt.compareSync(ADMIN_PASSWORD, admin.password_hash);
-      const shouldUpdateName = admin.name !== ADMIN_NAME || admin.employee_id !== ADMIN_NAME;
+    if (adminUser) {
+      const shouldUpdatePassword = !bcrypt.compareSync(adminConfig.password, adminUser.password_hash);
+      const shouldUpdateName = adminUser.name !== adminConfig.name || adminUser.employee_id !== adminConfig.name;
 
       if (shouldUpdatePassword || shouldUpdateName) {
         await runQuery(
           supabase
             .from("users")
             .update({
-              name: ADMIN_NAME,
-              employee_id: ADMIN_NAME,
+              name: adminConfig.name,
+              employee_id: adminConfig.name,
               password_hash: passwordHash,
             })
-            .eq("id", admin.id)
+            .eq("id", adminUser.id)
         );
       }
       return;
@@ -219,8 +399,8 @@ async function ensureAdminUser() {
         supabase
           .from("users")
           .update({
-            name: ADMIN_NAME,
-            employee_id: ADMIN_NAME,
+            name: adminConfig.name,
+            employee_id: adminConfig.name,
             password_hash: passwordHash,
           })
           .eq("id", legacyAdmin.id)
@@ -230,8 +410,8 @@ async function ensureAdminUser() {
 
     await runQuery(
       supabase.from("users").insert({
-        name: ADMIN_NAME,
-        employee_id: ADMIN_NAME,
+        name: adminConfig.name,
+        employee_id: adminConfig.name,
         password_hash: passwordHash,
         role: "admin",
       })
@@ -239,26 +419,26 @@ async function ensureAdminUser() {
     return;
   }
 
-  const admin = localUsers.find((user) => user.employee_id === ADMIN_NAME && user.role === "admin");
-  if (admin) {
-    admin.name = ADMIN_NAME;
-    admin.employee_id = ADMIN_NAME;
-    admin.password_hash = passwordHash;
+  const adminUser = localUsers.find((user) => user.employee_id === adminConfig.name && user.role === "admin");
+  if (adminUser) {
+    adminUser.name = adminConfig.name;
+    adminUser.employee_id = adminConfig.name;
+    adminUser.password_hash = passwordHash;
     return;
   }
 
   const legacyAdmin = localUsers.find((user) => user.employee_id === LEGACY_ADMIN_NAME && user.role === "admin");
   if (legacyAdmin) {
-    legacyAdmin.name = ADMIN_NAME;
-    legacyAdmin.employee_id = ADMIN_NAME;
+    legacyAdmin.name = adminConfig.name;
+    legacyAdmin.employee_id = adminConfig.name;
     legacyAdmin.password_hash = passwordHash;
     return;
   }
 
   localUsers.push({
     id: localUserSequence++,
-    name: ADMIN_NAME,
-    employee_id: ADMIN_NAME,
+    name: adminConfig.name,
+    employee_id: adminConfig.name,
     password_hash: passwordHash,
     role: "admin",
     created_at: new Date().toISOString(),
@@ -266,9 +446,12 @@ async function ensureAdminUser() {
 }
 
 async function initializeStorage() {
-  if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (supabaseUrl && supabaseServiceRoleKey) {
     try {
-      supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
         auth: {
           persistSession: false,
           autoRefreshToken: false,
@@ -278,8 +461,15 @@ async function initializeStorage() {
       storageMode = "supabase";
       return;
     } catch (error) {
+      if (!allowLocalStorageFallback()) {
+        throw new Error(`Falha ao conectar no Supabase e o fallback local esta desativado: ${error.message}`);
+      }
       console.warn("Supabase indisponivel ou sem schema. Usando banco local para teste.", error.message);
     }
+  }
+
+  if (!allowLocalStorageFallback()) {
+    throw new Error("SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY sao obrigatorios quando o fallback local esta desativado.");
   }
 
   storageMode = "local";
@@ -293,6 +483,16 @@ async function getUserByEmployeeId(employeeId) {
   }
 
   return localUsers.find((user) => user.employee_id === String(employeeId).trim()) || null;
+}
+
+async function getUserById(userId) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase.from("users").select("*").eq("id", userId).maybeSingle()
+    );
+  }
+
+  return localUsers.find((user) => isSameEntityId(user.id, userId)) || null;
 }
 
 async function insertEmployeeUser(name, employeeId, passwordHash) {
@@ -323,10 +523,214 @@ async function insertEmployeeUser(name, employeeId, passwordHash) {
   return user;
 }
 
-async function listRecordsForUser(user) {
+async function listEmployees() {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("users")
+        .select("*")
+        .eq("role", "employee")
+        .order("name", { ascending: true })
+    );
+  }
+
+  return [...localUsers]
+    .filter((user) => user.role === "employee")
+    .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), "pt-BR"));
+}
+
+async function listVehicles() {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("vehicles")
+        .select("*")
+        .order("plate", { ascending: true })
+    );
+  }
+
+  return [...localVehicles].sort((left, right) =>
+    String(left.plate || "").localeCompare(String(right.plate || ""), "pt-BR")
+  );
+}
+
+async function getVehicleByPlate(plate) {
+  const normalizedPlate = String(plate || "").trim().toUpperCase();
+
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("vehicles")
+        .select("*")
+        .eq("plate", normalizedPlate)
+        .maybeSingle()
+    );
+  }
+
+  return localVehicles.find((vehicle) => String(vehicle.plate || "").trim().toUpperCase() === normalizedPlate) || null;
+}
+
+async function getVehicleById(vehicleId) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("vehicles")
+        .select("*")
+        .eq("id", vehicleId)
+        .maybeSingle()
+    );
+  }
+
+  return localVehicles.find((vehicle) => isSameEntityId(vehicle.id, vehicleId)) || null;
+}
+
+async function insertVehicle(plate, description, initialKm) {
+  const payload = {
+    plate: String(plate).trim().toUpperCase(),
+    description: String(description || "").trim(),
+    initial_km: Number(initialKm),
+    current_km: Number(initialKm),
+  };
+
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("vehicles")
+        .insert(payload)
+        .select("*")
+        .single()
+    );
+  }
+
+  const vehicle = {
+    id: localVehicleSequence++,
+    ...payload,
+    created_at: new Date().toISOString(),
+  };
+  localVehicles.push(vehicle);
+  return vehicle;
+}
+
+async function deleteVehicle(vehicleId) {
+  if (storageMode === "supabase") {
+    const { error } = await supabase.from("vehicles").delete().eq("id", vehicleId);
+    if (error) {
+      throw error;
+    }
+    return true;
+  }
+
+  const before = localVehicles.length;
+  localVehicles = localVehicles.filter((vehicle) => !isSameEntityId(vehicle.id, vehicleId));
+  return localVehicles.length !== before;
+}
+
+async function updateVehicleCurrentKm(vehicleId, currentKm) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("vehicles")
+        .update({ current_km: Number(currentKm) })
+        .eq("id", vehicleId)
+        .select("*")
+        .maybeSingle()
+    );
+  }
+
+  const vehicle = localVehicles.find((item) => isSameEntityId(item.id, vehicleId));
+  if (!vehicle) {
+    return null;
+  }
+
+  vehicle.current_km = Number(currentKm);
+  return vehicle;
+}
+
+async function updateEmployeeUser(userId, updates) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("users")
+        .update(updates)
+        .eq("id", userId)
+        .eq("role", "employee")
+        .select("*")
+        .maybeSingle()
+    );
+  }
+
+  const user = localUsers.find((item) => isSameEntityId(item.id, userId) && item.role === "employee");
+  if (!user) {
+    return null;
+  }
+
+  Object.assign(user, updates);
+  return user;
+}
+
+async function updateEmployeePassword(userId, passwordHash) {
+  return updateEmployeeUser(userId, { password_hash: passwordHash });
+}
+
+async function countRecordsForUser(userId) {
+  if (storageMode === "supabase") {
+    const { count, error } = await supabase
+      .from("time_records")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId);
+
+    if (error) {
+      throw error;
+    }
+
+    return count || 0;
+  }
+
+  return localRecords.filter((record) => record.user_id === userId).length;
+}
+
+async function syncRecordSnapshotForUser(userId, userSnapshot) {
+  const updates = {
+    employee_name: userSnapshot.name,
+    employee_id: userSnapshot.employee_id,
+  };
+
+  if (storageMode === "supabase") {
+    await runQuery(
+      supabase
+        .from("time_records")
+        .update(updates)
+        .eq("user_id", userId)
+    );
+    return;
+  }
+
+  localRecords = localRecords.map((record) => (
+    record.user_id === userId
+      ? { ...record, ...updates }
+      : record
+  ));
+}
+
+async function deleteEmployeeUser(userId) {
+  if (storageMode === "supabase") {
+    const { error } = await supabase.from("users").delete().eq("id", userId).eq("role", "employee");
+    if (error) {
+      throw error;
+    }
+    return true;
+  }
+
+  const before = localUsers.length;
+  localUsers = localUsers.filter((user) => !(isSameEntityId(user.id, userId) && user.role === "employee"));
+  return localUsers.length !== before;
+}
+
+async function listRecordsForUser(user, filters = null) {
   if (storageMode === "supabase") {
     if (user.role === "admin") {
-      return runQuery(supabase.from("time_records").select("*").order("recorded_at", { ascending: false }));
+      const rows = await runQuery(supabase.from("time_records").select("*").order("recorded_at", { ascending: false }));
+      return filters ? applyRecordFilters(rows, filters) : rows;
     }
 
     return runQuery(
@@ -335,7 +739,8 @@ async function listRecordsForUser(user) {
   }
 
   if (user.role === "admin") {
-    return [...localRecords].sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at));
+    const rows = [...localRecords].sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at));
+    return filters ? applyRecordFilters(rows, filters) : rows;
   }
 
   return localRecords
@@ -363,12 +768,94 @@ async function insertRecord(user, payload) {
   return record;
 }
 
-async function listAllRecordsAscending() {
+async function listAllRecordsAscending(filters = null) {
   if (storageMode === "supabase") {
-    return runQuery(supabase.from("time_records").select("*").order("recorded_at", { ascending: true }));
+    const rows = await runQuery(supabase.from("time_records").select("*").order("recorded_at", { ascending: true }));
+    return filters ? applyRecordFilters(rows, filters) : rows;
   }
 
-  return [...localRecords].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+  const rows = [...localRecords].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+  return filters ? applyRecordFilters(rows, filters) : rows;
+}
+
+async function listUserRecordsAscending(userId) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("time_records")
+        .select("*")
+        .eq("user_id", userId)
+        .order("recorded_at", { ascending: true })
+    );
+  }
+
+  return localRecords
+    .filter((record) => record.user_id === userId)
+    .sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+}
+
+function getOpenJourneyRecords(records) {
+  const lastExitIndex = [...records].map((record) => record.action).lastIndexOf("Saida");
+  return lastExitIndex === -1 ? records : records.slice(lastExitIndex + 1);
+}
+
+function getAllowedNextActions(records) {
+  if (!records.length) {
+    return ["Entrada"];
+  }
+
+  const lastAction = records[records.length - 1].action;
+  if (lastAction === "Entrada") {
+    return ["Saida para almoco", "Saida"];
+  }
+  if (lastAction === "Saida para almoco") {
+    return ["Retorno do almoco"];
+  }
+  if (lastAction === "Retorno do almoco") {
+    return ["Saida"];
+  }
+  if (lastAction === "Saida") {
+    return ["Entrada"];
+  }
+
+  return [];
+}
+
+function validateRecordSequence(records, nextAction, timestamp) {
+  if (!timestamp || Number.isNaN(new Date(timestamp).getTime())) {
+    return "Horario do registro invalido.";
+  }
+
+  if (records.length) {
+    const lastRecord = records[records.length - 1];
+    if (new Date(timestamp).getTime() < new Date(lastRecord.recorded_at).getTime()) {
+      return "O horario informado nao pode ser anterior ao ultimo registro ja existente.";
+    }
+  }
+
+  const journeyRecords = getOpenJourneyRecords(records);
+  const allowedActions = getAllowedNextActions(journeyRecords);
+  if (!allowedActions.includes(nextAction)) {
+    if (!journeyRecords.length) {
+      return "O primeiro registro do dia deve ser uma Entrada.";
+    }
+
+    return `Sequencia de ponto invalida. Proxima acao permitida: ${allowedActions.join(" ou ")}.`;
+  }
+
+  return null;
+}
+
+function resetInMemoryState() {
+  storageMode = "local";
+  supabase = null;
+  localUsers = [];
+  localRecords = [];
+  localVehicles = [];
+  localUserSequence = 1;
+  localRecordSequence = 1;
+  localVehicleSequence = 1;
+  initializationPromise = null;
 }
 
 app.get("/api/health", (_req, res) => {
@@ -397,9 +884,121 @@ async function createEmployeeFromRequest(req, res) {
   return res.status(201).json({ user: serializeUser(user) });
 }
 
+async function requireManagedEmployee(employeeId) {
+  const employee = await getUserById(employeeId);
+  if (!employee || employee.role !== "employee") {
+    return null;
+  }
+
+  return employee;
+}
+
 app.post("/api/auth/register", requireAdmin, asyncRoute(createEmployeeFromRequest));
 
 app.post("/api/admin/employees", requireAdmin, asyncRoute(createEmployeeFromRequest));
+
+app.get("/api/vehicles", requireAuth, asyncRoute(async (_req, res) => {
+  const vehicles = await listVehicles();
+  return res.json({ vehicles: vehicles.map(serializeVehicle) });
+}));
+
+app.post("/api/admin/vehicles", requireAdmin, asyncRoute(async (req, res) => {
+  const { plate, description, initialKm } = req.body;
+
+  if (!plate) {
+    return res.status(400).json({ error: "Informe a placa do veiculo." });
+  }
+
+  if (initialKm === undefined || initialKm === null || Number.isNaN(Number(initialKm)) || Number(initialKm) < 0) {
+    return res.status(400).json({ error: "Informe o KM inicial do veiculo." });
+  }
+
+  const existingVehicle = await getVehicleByPlate(plate);
+  if (existingVehicle) {
+    return res.status(409).json({ error: "Ja existe um veiculo com essa placa." });
+  }
+
+  const vehicle = await insertVehicle(plate, description, initialKm);
+  return res.status(201).json({ vehicle: serializeVehicle(vehicle) });
+}));
+
+app.get("/api/admin/vehicles", requireAdmin, asyncRoute(async (_req, res) => {
+  const vehicles = await listVehicles();
+  return res.json({ vehicles: vehicles.map(serializeVehicle) });
+}));
+
+app.delete("/api/admin/vehicles/:vehicleId", requireAdmin, asyncRoute(async (req, res) => {
+  const vehicle = await getVehicleById(req.params.vehicleId);
+  if (!vehicle) {
+    return res.status(404).json({ error: "Veiculo nao encontrado." });
+  }
+
+  await deleteVehicle(vehicle.id);
+  return res.json({ ok: true });
+}));
+
+app.get("/api/admin/employees", requireAdmin, asyncRoute(async (_req, res) => {
+  const employees = await listEmployees();
+  return res.json({ employees: employees.map(serializeManagedEmployee) });
+}));
+
+app.patch("/api/admin/employees/:employeeId", requireAdmin, asyncRoute(async (req, res) => {
+  const employee = await requireManagedEmployee(req.params.employeeId);
+  if (!employee) {
+    return res.status(404).json({ error: "Funcionario nao encontrado." });
+  }
+
+  const { name, employeeId } = req.body;
+  if (!name || !employeeId) {
+    return res.status(400).json({ error: "Nome e matricula sao obrigatorios." });
+  }
+
+  const cleanEmployeeId = String(employeeId).trim();
+  const existingUser = await getUserByEmployeeId(cleanEmployeeId);
+  if (existingUser && existingUser.id !== employee.id) {
+    return res.status(409).json({ error: "Ja existe um usuario com essa matricula." });
+  }
+
+  const updatedEmployee = await updateEmployeeUser(employee.id, {
+    name: String(name).trim(),
+    employee_id: cleanEmployeeId,
+  });
+
+  await syncRecordSnapshotForUser(employee.id, updatedEmployee);
+
+  return res.json({ employee: serializeManagedEmployee(updatedEmployee) });
+}));
+
+app.post("/api/admin/employees/:employeeId/password", requireAdmin, asyncRoute(async (req, res) => {
+  const employee = await requireManagedEmployee(req.params.employeeId);
+  if (!employee) {
+    return res.status(404).json({ error: "Funcionario nao encontrado." });
+  }
+
+  const { password } = req.body;
+  if (!password) {
+    return res.status(400).json({ error: "Informe a nova senha." });
+  }
+
+  const passwordHash = bcrypt.hashSync(String(password), 10);
+  const updatedEmployee = await updateEmployeePassword(employee.id, passwordHash);
+  return res.json({ employee: serializeManagedEmployee(updatedEmployee) });
+}));
+
+app.delete("/api/admin/employees/:employeeId", requireAdmin, asyncRoute(async (req, res) => {
+  const employee = await requireManagedEmployee(req.params.employeeId);
+  if (!employee) {
+    return res.status(404).json({ error: "Funcionario nao encontrado." });
+  }
+
+  const recordCount = await countRecordsForUser(employee.id);
+  if (recordCount > 0) {
+    return res.status(409).json({ error: "Funcionario possui registros e nao pode ser excluido." });
+  }
+
+  await deleteEmployeeUser(employee.id);
+  return res.json({ ok: true });
+}));
 
 app.post("/api/auth/login", asyncRoute(async (req, res) => {
   const { employeeId, password } = req.body;
@@ -424,7 +1023,8 @@ app.post("/api/auth/logout", (req, res) => {
 });
 
 app.get("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
-  const rows = await listRecordsForUser(req.authUser);
+  const filters = req.authUser.role === "admin" ? normalizeAdminFilters(req.query) : null;
+  const rows = await listRecordsForUser(req.authUser, filters);
   return res.json({ records: rows });
 }));
 
@@ -445,9 +1045,25 @@ app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
     return res.status(400).json({ error: "Informe a placa e o KM do veiculo." });
   }
 
+  const normalizedVehiclePlate = String(vehiclePlate).trim().toUpperCase();
+  const numericVehicleKm = Number(vehicleKm);
+  const registeredVehicle = await getVehicleByPlate(normalizedVehiclePlate);
+
+  if (registeredVehicle && numericVehicleKm < Number(registeredVehicle.current_km ?? 0)) {
+    return res.status(409).json({
+      error: `O KM informado nao pode ser menor que o KM atual do veiculo (${registeredVehicle.current_km}).`,
+    });
+  }
+
   const timestamp = recordedAt || new Date().toISOString();
   const date = localDate || new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(new Date(timestamp));
   const time = localTime || new Intl.DateTimeFormat("pt-BR", { timeStyle: "medium" }).format(new Date(timestamp));
+  const userRecords = await listUserRecordsAscending(user.id);
+  const sequenceError = validateRecordSequence(userRecords, action, timestamp);
+
+  if (sequenceError) {
+    return res.status(409).json({ error: sequenceError });
+  }
 
   const record = await insertRecord(user, {
     user_id: user.id,
@@ -460,15 +1076,20 @@ app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
     latitude: typeof latitude === "number" ? latitude : null,
     longitude: typeof longitude === "number" ? longitude : null,
     location_label: locationLabel || "Localizacao nao informada",
-    vehicle_plate: String(vehiclePlate).trim().toUpperCase(),
-    vehicle_km: Number(vehicleKm),
+    vehicle_plate: normalizedVehiclePlate,
+    vehicle_km: numericVehicleKm,
   });
+
+  if (registeredVehicle) {
+    await updateVehicleCurrentKm(registeredVehicle.id, numericVehicleKm);
+  }
 
   return res.status(201).json({ record });
 }));
 
 app.get("/api/admin/summary", requireAdmin, asyncRoute(async (_req, res) => {
-  const rows = await listAllRecordsAscending();
+  const filters = normalizeAdminFilters(_req.query);
+  const rows = await listAllRecordsAscending(filters);
   const summary = computeSummary(rows).map((item) => ({
     employeeName: item.employeeName,
     employeeId: item.employeeId,
@@ -483,11 +1104,20 @@ app.get("/api/admin/summary", requireAdmin, asyncRoute(async (_req, res) => {
     lunchEnds: item.lunchEnds,
     exits: item.exits,
   }));
-  return res.json({ summary });
+  return res.json({
+    summary,
+    filters: {
+      employeeId: filters.employeeId,
+      vehiclePlate: filters.vehiclePlate,
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+    },
+  });
 }));
 
-app.get("/api/admin/export.csv", requireAdmin, asyncRoute(async (_req, res) => {
-  const rows = await listAllRecordsAscending();
+app.get("/api/admin/export.csv", requireAdmin, asyncRoute(async (req, res) => {
+  const filters = normalizeAdminFilters(req.query);
+  const rows = await listAllRecordsAscending(filters);
 
   const csvRows = [
     [
@@ -496,13 +1126,8 @@ app.get("/api/admin/export.csv", requireAdmin, asyncRoute(async (_req, res) => {
       "Acao",
       "Data",
       "Hora",
-      "Data e hora ISO",
-      "Latitude",
-      "Longitude",
-      "Localizacao aproximada",
       "Placa do veiculo",
       "KM do veiculo",
-      "Google Maps",
     ],
     ...rows.map((row) => [
       row.employee_name,
@@ -510,13 +1135,8 @@ app.get("/api/admin/export.csv", requireAdmin, asyncRoute(async (_req, res) => {
       row.action,
       row.local_date,
       row.local_time,
-      row.recorded_at,
-      row.latitude ?? "",
-      row.longitude ?? "",
-      row.location_label ?? "",
       row.vehicle_plate ?? "",
       row.vehicle_km ?? "",
-      createMapsUrl(row),
     ]),
     [],
     ["Rodape explicativo"],
@@ -525,13 +1145,8 @@ app.get("/api/admin/export.csv", requireAdmin, asyncRoute(async (_req, res) => {
     ["Acao", "Tipo de ponto registrado"],
     ["Data", "Dia local do registro"],
     ["Hora", "Hora local do registro"],
-    ["Data e hora ISO", "Timestamp completo usado para auditoria"],
-    ["Latitude", "Latitude obtida no celular"],
-    ["Longitude", "Longitude obtida no celular"],
-    ["Localizacao aproximada", "Descricao curta da localizacao armazenada"],
     ["Placa do veiculo", "Placa informada pelo funcionario ao registrar o ponto"],
     ["KM do veiculo", "Quilometragem informada no momento do registro"],
-    ["Google Maps", "Link direto para abrir a coordenada registrada no Google Maps"],
   ];
 
   const csv = csvRows
@@ -539,15 +1154,18 @@ app.get("/api/admin/export.csv", requireAdmin, asyncRoute(async (_req, res) => {
     .join("\n");
 
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("X-Export-Filters", buildFilterQueryString(filters));
   res.setHeader("Content-Disposition", `attachment; filename="cartao-ponto-${new Date().toISOString().slice(0, 10)}.csv"`);
   return res.send(csv);
 }));
 
-app.get("/api/admin/export.xlsx", requireAdmin, asyncRoute(async (_req, res) => {
-  const rows = await listAllRecordsAscending();
+app.get("/api/admin/export.xlsx", requireAdmin, asyncRoute(async (req, res) => {
+  const filters = normalizeAdminFilters(req.query);
+  const rows = await listAllRecordsAscending(filters);
 
   const workbook = createWorkbook(rows);
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("X-Export-Filters", buildFilterQueryString(filters));
   res.setHeader("Content-Disposition", `attachment; filename="planilha-cartao-ponto-lc-transportes-${new Date().toISOString().slice(0, 10)}.xlsx"`);
   await workbook.xlsx.write(res);
   res.end();
@@ -559,17 +1177,29 @@ app.use((error, _req, res, _next) => {
 });
 
 app.use((_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 async function start() {
+  ensureRuntimeConfig();
   await ensureInitialized();
   app.listen(PORT, () => {
     console.log(`Servidor iniciado em http://localhost:${PORT} usando modo ${storageMode}`);
   });
 }
 
+app.__testing = {
+  resetInMemoryState,
+  validateRecordSequence,
+  getAllowedNextActions,
+  normalizeAdminFilters,
+  applyRecordFilters,
+};
+
 module.exports = app;
+module.exports.start = start;
+module.exports.__testing = app.__testing;
 
 if (require.main === module) {
   start().catch((error) => {

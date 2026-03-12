@@ -12,8 +12,10 @@ Sistema web mobile-first com:
 
 ## Credenciais do administrador
 
-- usuario: `Lc transporte`
-- senha: `2096`
+Defina o administrador pelo arquivo `.env`:
+
+- `ADMIN_NAME`
+- `ADMIN_PASSWORD`
 
 ## Configurar no Supabase
 
@@ -28,8 +30,11 @@ Exemplo:
 ```env
 SUPABASE_URL=https://seu-projeto.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=sua-service-role-key
+ADMIN_NAME=Lc transporte
+ADMIN_PASSWORD=troque-a-senha-do-admin
 SESSION_SECRET=uma-chave-forte
 PORT=3000
+ALLOW_LOCAL_STORAGE_FALLBACK=true
 ```
 
 ## Como rodar
@@ -60,6 +65,8 @@ Passos:
 ```env
 SUPABASE_URL=https://cmdjeortnocxzoovswhf.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=sua-service-role-key
+ADMIN_NAME=Lc transporte
+ADMIN_PASSWORD=troque-a-senha-do-admin
 SESSION_SECRET=uma-chave-forte
 ```
 
@@ -70,6 +77,7 @@ Observacoes:
 - O endpoint de health check e `/api/health`.
 - O app usa `npm start` como comando de inicializacao.
 - O projeto esta configurado para Node 22.
+- Em producao, prefira `ALLOW_LOCAL_STORAGE_FALLBACK=false` para impedir troca silenciosa para armazenamento local.
 
 ## Estrutura principal
 
@@ -90,13 +98,18 @@ Observacoes:
 
 ### Administrador
 
-1. Entra com `Lc transporte` / `2096`.
+1. Entra com as credenciais configuradas em `ADMIN_NAME` e `ADMIN_PASSWORD`.
 2. Ve todos os registros do sistema.
-3. Ve resumo consolidado por dia.
-4. Exporta CSV completo com rodape explicativo.
+3. Filtra por matricula, veiculo e periodo para analisar operacao e exportacoes.
+4. Cadastra, edita, redefine senha e exclui funcionarios sem historico.
+5. Ve resumo consolidado por dia.
+6. Exporta CSV e XLSX com o mesmo recorte aplicado nos filtros.
 
 ## Observacoes
 
 - Esta versao passa a salvar usuarios e registros no projeto Supabase.
 - As sessoes HTTP continuam locais no servidor Node.
+- O backend valida a sequencia das batidas por dia: a primeira deve ser `Entrada`, almoco exige retorno e uma nova `Entrada` so e aceita depois de `Saida`.
+- O painel do administrador agora lista funcionarios cadastrados e permite editar nome, matricula, senha e exclusao segura sem apagar historico.
+- Os filtros administrativos de matricula, veiculo e periodo afetam registros, resumo e exportacoes.
 - Para producao real, o ideal e adicionar HTTPS, redefinicao de senha, auditoria de acesso e deploy em servidor/cloud.

@@ -2,9 +2,18 @@ const state = {
   user: null,
   records: [],
   summary: [],
-  selectedEmployeeId: "",
-  showEmployeeFilter: false,
+  employees: [],
+  vehicles: [],
+  managedEmployeeId: "",
   showRegisterForm: false,
+  showVehicleRegisterForm: false,
+  hasAutoOpenedVehicleRegister: false,
+  adminFilters: {
+    employeeId: "",
+    vehiclePlate: "",
+    dateFrom: "",
+    dateTo: "",
+  },
 };
 
 const formatters = {
@@ -27,16 +36,41 @@ const locationStatus = document.querySelector("#locationStatus");
 const recordsList = document.querySelector("#recordsList");
 const summaryBody = document.querySelector("#summaryBody");
 const exportActions = document.querySelector("#exportActions");
-const toggleFilterButton = document.querySelector("#toggleFilterButton");
 const recordsFilterPanel = document.querySelector("#recordsFilterPanel");
 const employeeFilter = document.querySelector("#employeeFilter");
+const vehiclePlateFilter = document.querySelector("#vehiclePlateFilter");
+const dateFromFilter = document.querySelector("#dateFromFilter");
+const dateToFilter = document.querySelector("#dateToFilter");
+const applyAdminFiltersButton = document.querySelector("#applyAdminFiltersButton");
+const clearAdminFiltersButton = document.querySelector("#clearAdminFiltersButton");
+const exportXlsxLink = document.querySelector("#exportXlsxLink");
 const recordTemplate = document.querySelector("#recordTemplate");
 const loginForm = document.querySelector("#loginForm");
 const registerForm = document.querySelector("#registerForm");
 const toggleRegisterButton = document.querySelector("#toggleRegisterButton");
 const logoutButton = document.querySelector("#logoutButton");
+const employeeAdminBody = document.querySelector("#employeeAdminBody");
+const employeeManagerMessage = document.querySelector("#employeeManagerMessage");
+const employeeEditorPanel = document.querySelector("#employeeEditorPanel");
+const employeeEditorTitle = document.querySelector("#employeeEditorTitle");
+const employeeEditForm = document.querySelector("#employeeEditForm");
+const manageEmployeeIdInput = document.querySelector("#manageEmployeeId");
+const editEmployeeNameInput = document.querySelector("#editEmployeeName");
+const editEmployeeIdInput = document.querySelector("#editEmployeeId");
+const cancelEmployeeEditButton = document.querySelector("#cancelEmployeeEditButton");
+const employeePasswordForm = document.querySelector("#employeePasswordForm");
+const employeePasswordInput = document.querySelector("#employeePasswordInput");
+const deleteEmployeeButton = document.querySelector("#deleteEmployeeButton");
+const vehicleRegisterForm = document.querySelector("#vehicleRegisterForm");
+const toggleVehicleRegisterButton = document.querySelector("#toggleVehicleRegisterButton");
+const registerVehiclePlateInput = document.querySelector("#registerVehiclePlate");
+const registerVehicleDescriptionInput = document.querySelector("#registerVehicleDescription");
+const registerVehicleInitialKmInput = document.querySelector("#registerVehicleInitialKm");
+const vehicleManagerMessage = document.querySelector("#vehicleManagerMessage");
+const vehicleAdminBody = document.querySelector("#vehicleAdminBody");
 const vehicleDialog = document.querySelector("#vehicleDialog");
 const vehicleForm = document.querySelector("#vehicleForm");
+const vehicleSelectInput = document.querySelector("#vehicleSelectInput");
 const vehiclePlateInput = document.querySelector("#vehiclePlateInput");
 const vehicleKmInput = document.querySelector("#vehicleKmInput");
 const vehicleFormMessage = document.querySelector("#vehicleFormMessage");
@@ -95,6 +129,19 @@ function formatVehicle(record) {
   return `Veiculo: ${vehiclePlate} - KM: ${vehicleKm}`;
 }
 
+function formatCreatedAt(value) {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  return formatters.datetime.format(date);
+}
+
 function createMapsUrl(record) {
   if (typeof record.latitude !== "number" || typeof record.longitude !== "number") {
     return "";
@@ -103,20 +150,45 @@ function createMapsUrl(record) {
   return `https://www.google.com/maps/search/?api=1&query=${record.latitude},${record.longitude}`;
 }
 
+function buildQueryString(params) {
+  const query = new URLSearchParams();
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value) {
+      query.set(key, value);
+    }
+  });
+
+  const serialized = query.toString();
+  return serialized ? `?${serialized}` : "";
+}
+
+function hasActiveAdminFilters() {
+  return Boolean(
+    state.adminFilters.employeeId ||
+    state.adminFilters.vehiclePlate ||
+    state.adminFilters.dateFrom ||
+    state.adminFilters.dateTo
+  );
+}
+
 function renderRecords() {
   recordsList.innerHTML = "";
-  if (state.user?.role === "admin" && !state.showEmployeeFilter) {
-    recordsList.innerHTML = '<p class="muted">Clique em "Mostrar filtro" para visualizar registros por matricula.</p>';
+
+  if (state.user?.role === "admin" && !hasActiveAdminFilters()) {
     return;
   }
 
   const visibleRecords =
-    state.user?.role === "admin" && state.selectedEmployeeId
-      ? state.records.filter((record) => record.employee_id === state.selectedEmployeeId)
+    state.user?.role === "employee"
+      ? state.records.filter((record) => record.local_date === formatters.date.format(new Date()))
       : state.records;
 
   if (!visibleRecords.length) {
-    recordsList.innerHTML = '<p class="muted">Nenhum registro encontrado.</p>';
+    recordsList.innerHTML =
+      state.user?.role === "employee"
+        ? '<p class="muted">Nenhum registro encontrado para hoje.</p>'
+        : '<p class="muted">Nenhum registro encontrado para os filtros informados.</p>';
     return;
   }
 
@@ -147,17 +219,14 @@ function renderEmployeeFilter() {
   exportActions.classList.toggle("hidden", !isAdmin);
 
   if (!isAdmin) {
-    state.selectedEmployeeId = "";
-    state.showEmployeeFilter = false;
     recordsFilterPanel.classList.add("hidden");
     return;
   }
 
-  toggleFilterButton.textContent = state.showEmployeeFilter ? "Ocultar filtro" : "Mostrar filtro";
-  recordsFilterPanel.classList.toggle("hidden", !state.showEmployeeFilter);
+  recordsFilterPanel.classList.remove("hidden");
 
-  const currentValue = state.selectedEmployeeId;
-  const options = [...new Set(state.records.map((record) => record.employee_id).filter(Boolean))].sort();
+  const currentValue = state.adminFilters.employeeId;
+  const options = [...new Set(state.employees.map((employee) => employee.employeeId).filter(Boolean))].sort();
   employeeFilter.innerHTML = '<option value="">Todas as matriculas</option>';
 
   for (const employeeId of options) {
@@ -168,7 +237,162 @@ function renderEmployeeFilter() {
   }
 
   employeeFilter.value = options.includes(currentValue) ? currentValue : "";
-  state.selectedEmployeeId = employeeFilter.value;
+  state.adminFilters.employeeId = employeeFilter.value;
+  vehiclePlateFilter.value = state.adminFilters.vehiclePlate;
+  dateFromFilter.value = state.adminFilters.dateFrom;
+  dateToFilter.value = state.adminFilters.dateTo;
+  updateExportLinks();
+}
+
+function getManagedEmployee() {
+  return state.employees.find((employee) => employee.id === state.managedEmployeeId) || null;
+}
+
+function setEmployeeManagerMessage(message, isError = false) {
+  employeeManagerMessage.textContent = message;
+  employeeManagerMessage.style.color = isError ? "#a33f33" : "";
+}
+
+function setVehicleManagerMessage(message, isError = false) {
+  vehicleManagerMessage.textContent = message;
+  vehicleManagerMessage.style.color = isError ? "#a33f33" : "";
+}
+
+function renderEmployeeEditor() {
+  const employee = getManagedEmployee();
+
+  if (!employee) {
+    employeeEditorPanel.classList.add("hidden");
+    manageEmployeeIdInput.value = "";
+    employeeEditForm.reset();
+    employeePasswordForm.reset();
+    return;
+  }
+
+  employeeEditorPanel.classList.remove("hidden");
+  employeeEditorTitle.textContent = `${employee.name} (${employee.employeeId})`;
+  manageEmployeeIdInput.value = employee.id;
+  editEmployeeNameInput.value = employee.name;
+  editEmployeeIdInput.value = employee.employeeId;
+  employeePasswordForm.reset();
+}
+
+function renderManagedEmployees() {
+  const isAdmin = state.user?.role === "admin";
+
+  if (!isAdmin) {
+    state.employees = [];
+    state.managedEmployeeId = "";
+    employeeAdminBody.innerHTML = "";
+    setEmployeeManagerMessage("");
+    renderEmployeeEditor();
+    return;
+  }
+
+  const selectedEmployeeExists = state.employees.some((employee) => employee.id === state.managedEmployeeId);
+  if (!selectedEmployeeExists) {
+    state.managedEmployeeId = "";
+  }
+
+  employeeAdminBody.innerHTML = "";
+
+  if (!state.employees.length) {
+    employeeAdminBody.innerHTML = '<tr><td colspan="4" class="empty-row">Nenhum funcionario cadastrado.</td></tr>';
+    renderEmployeeEditor();
+    return;
+  }
+
+  for (const employee of state.employees) {
+    const row = document.createElement("tr");
+    if (employee.id === state.managedEmployeeId) {
+      row.classList.add("employee-row-active");
+    }
+
+    const nameCell = document.createElement("td");
+    nameCell.textContent = employee.name;
+
+    const employeeIdCell = document.createElement("td");
+    employeeIdCell.textContent = employee.employeeId;
+
+    const createdAtCell = document.createElement("td");
+    createdAtCell.textContent = formatCreatedAt(employee.createdAt);
+
+    const actionsCell = document.createElement("td");
+    const actions = document.createElement("div");
+    actions.className = "employee-actions";
+
+    const manageButton = document.createElement("button");
+    manageButton.type = "button";
+    manageButton.className = employee.id === state.managedEmployeeId ? "secondary table-action" : "ghost table-action";
+    manageButton.dataset.manageEmployee = employee.id;
+    manageButton.textContent = employee.id === state.managedEmployeeId ? "Selecionado" : "Gerenciar";
+
+    actions.appendChild(manageButton);
+    actionsCell.appendChild(actions);
+    row.append(nameCell, employeeIdCell, createdAtCell, actionsCell);
+    employeeAdminBody.appendChild(row);
+  }
+
+  renderEmployeeEditor();
+}
+
+function renderVehicles() {
+  if (vehicleSelectInput) {
+    vehicleSelectInput.innerHTML = '<option value="">Digite manualmente</option>';
+    for (const vehicle of state.vehicles) {
+      const option = document.createElement("option");
+      option.value = vehicle.plate;
+      option.textContent = vehicle.description ? `${vehicle.plate} - ${vehicle.description}` : vehicle.plate;
+      vehicleSelectInput.appendChild(option);
+    }
+  }
+
+  if (!vehicleAdminBody) {
+    return;
+  }
+
+  if (state.user?.role !== "admin") {
+    vehicleAdminBody.innerHTML = "";
+    state.showVehicleRegisterForm = false;
+    vehicleRegisterForm.classList.add("hidden");
+    return;
+  }
+
+  if (!state.vehicles.length && !state.hasAutoOpenedVehicleRegister) {
+    state.showVehicleRegisterForm = true;
+    state.hasAutoOpenedVehicleRegister = true;
+  }
+
+  vehicleRegisterForm.classList.toggle("hidden", !state.showVehicleRegisterForm);
+  toggleVehicleRegisterButton.textContent = state.showVehicleRegisterForm ? "Ocultar cadastro" : "Novo veiculo";
+
+  vehicleAdminBody.innerHTML = "";
+
+  if (!state.vehicles.length) {
+    vehicleAdminBody.innerHTML = '<tr><td colspan="5" class="empty-row">Nenhum veiculo cadastrado.</td></tr>';
+    return;
+  }
+
+  for (const vehicle of state.vehicles) {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${vehicle.plate}</td>
+      <td>${vehicle.description || "-"}</td>
+      <td>${vehicle.initialKm ?? 0}</td>
+      <td>${vehicle.currentKm ?? 0}</td>
+      <td>
+        <div class="employee-actions">
+          <button type="button" class="ghost table-action" data-delete-vehicle="${vehicle.id}">Excluir</button>
+        </div>
+      </td>
+    `;
+    vehicleAdminBody.appendChild(row);
+  }
+}
+
+function updateExportLinks() {
+  const queryString = buildQueryString(state.adminFilters);
+  exportXlsxLink.href = `/api/admin/export.xlsx${queryString}`;
 }
 
 function renderRegisterForm() {
@@ -185,13 +409,16 @@ function renderRegisterForm() {
 }
 
 function renderSummary() {
+  const today = formatters.date.format(new Date());
+  const visibleSummary = state.summary.filter((item) => item.localDate === today);
+
   summaryBody.innerHTML = "";
-  if (!state.summary.length) {
-    summaryBody.innerHTML = '<tr><td colspan="7" class="empty-row">Nenhum resumo disponivel.</td></tr>';
+  if (!visibleSummary.length) {
+    summaryBody.innerHTML = '<tr><td colspan="7" class="empty-row">Nenhum resumo disponivel para hoje.</td></tr>';
     return;
   }
 
-  for (const item of state.summary) {
+  for (const item of visibleSummary) {
     const row = document.createElement("tr");
     const hasOvertime = item.overtimeHours && item.overtimeHours !== "00:00";
     const overtimeClass = hasOvertime ? "summary-badge overtime" : "summary-badge neutral";
@@ -242,19 +469,21 @@ function renderSession() {
   sessionTitle.textContent = `${user.name}`;
   sessionSubtitle.textContent =
     user.role === "admin"
-      ? "Administrador com acesso completo a funcionarios, cadastros, registros e exportacao."
-      : `Funcionario autenticado. Matricula ${user.employeeId}.`;
+      ? ""
+      : "";
 
   const isAdmin = user.role === "admin";
   employeePanel.classList.toggle("hidden", isAdmin);
   adminPanel.classList.toggle("hidden", !isAdmin);
   recordsTitle.textContent = isAdmin ? "Todos os registros" : "Meus registros";
   recordsSubtitle.textContent = isAdmin
-    ? "Visao completa do sistema em ordem cronologica."
-    : "Somente os registros da sua conta aparecem aqui.";
+    ? ""
+    : "";
 
   renderEmployeeFilter();
   renderRegisterForm();
+  renderManagedEmployees();
+  renderVehicles();
   renderRecords();
   renderSummary();
 }
@@ -265,15 +494,28 @@ async function loadSession() {
   renderSession();
 
   if (state.user) {
+    await loadVehicles();
     await loadRecords();
     if (state.user.role === "admin") {
+      await loadEmployees();
       await loadSummary();
     }
   }
 }
 
 async function loadRecords() {
-  const data = await api("/api/me/records");
+  if (state.user?.role === "admin" && !hasActiveAdminFilters()) {
+    state.records = [];
+    renderEmployeeFilter();
+    renderRecords();
+    return;
+  }
+
+  const path =
+    state.user?.role === "admin"
+      ? `/api/me/records${buildQueryString(state.adminFilters)}`
+      : "/api/me/records";
+  const data = await api(path);
   state.records = data.records;
   renderEmployeeFilter();
   renderRecords();
@@ -286,9 +528,35 @@ async function loadSummary() {
     return;
   }
 
-  const data = await api("/api/admin/summary");
+  const data = await api(`/api/admin/summary${buildQueryString(state.adminFilters)}`);
   state.summary = data.summary;
   renderSummary();
+}
+
+async function loadEmployees() {
+  if (state.user?.role !== "admin") {
+    state.employees = [];
+    state.managedEmployeeId = "";
+    renderManagedEmployees();
+    renderEmployeeFilter();
+    return;
+  }
+
+  const data = await api("/api/admin/employees");
+  state.employees = data.employees;
+  renderManagedEmployees();
+}
+
+async function loadVehicles() {
+  if (!state.user) {
+    state.vehicles = [];
+    renderVehicles();
+    return;
+  }
+
+  const data = await api("/api/vehicles");
+  state.vehicles = data.vehicles;
+  renderVehicles();
 }
 
 function getCurrentPosition(options = {}) {
@@ -332,6 +600,11 @@ async function getBestCurrentPosition() {
 function collectVehicleInfo() {
   vehicleForm.reset();
   vehicleFormMessage.textContent = "";
+  if (vehicleSelectInput) {
+    vehicleSelectInput.value = "";
+  }
+  vehiclePlateInput.readOnly = false;
+  renderVehicles();
 
   return new Promise((resolve) => {
     vehicleDialogResolver = resolve;
@@ -358,6 +631,8 @@ async function handleRegister(event) {
     registerForm.reset();
     state.showRegisterForm = false;
     renderRegisterForm();
+    await loadVehicles();
+    await loadEmployees();
     await loadRecords();
     await loadSummary();
   } catch (error) {
@@ -390,29 +665,62 @@ async function handleLogout() {
   state.user = null;
   state.records = [];
   state.summary = [];
-  state.selectedEmployeeId = "";
-  state.showEmployeeFilter = false;
+  state.employees = [];
+  state.vehicles = [];
+  state.managedEmployeeId = "";
   state.showRegisterForm = false;
+  state.showVehicleRegisterForm = false;
+  state.hasAutoOpenedVehicleRegister = false;
+  state.adminFilters = {
+    employeeId: "",
+    vehiclePlate: "",
+    dateFrom: "",
+    dateTo: "",
+  };
   renderSession();
   setMessage("Sessao encerrada com sucesso.");
 }
 
-function handleToggleFilter() {
-  if (state.user?.role !== "admin") {
-    return;
-  }
-
-  state.showEmployeeFilter = !state.showEmployeeFilter;
-  if (!state.showEmployeeFilter) {
-    state.selectedEmployeeId = "";
-  }
-  renderEmployeeFilter();
-  renderRecords();
+function syncAdminFiltersFromInputs() {
+  state.adminFilters.employeeId = employeeFilter.value.trim();
+  state.adminFilters.vehiclePlate = vehiclePlateFilter.value.trim().toUpperCase();
+  state.adminFilters.dateFrom = dateFromFilter.value;
+  state.adminFilters.dateTo = dateToFilter.value;
 }
 
-function handleEmployeeFilterChange() {
-  state.selectedEmployeeId = employeeFilter.value;
-  renderRecords();
+async function applyAdminFilters() {
+  syncAdminFiltersFromInputs();
+  setEmployeeManagerMessage("");
+  renderEmployeeFilter();
+  await loadRecords();
+  await loadSummary();
+}
+
+async function handleApplyAdminFilters() {
+  try {
+    await applyAdminFilters();
+    locationStatus.textContent = "Filtros administrativos atualizados.";
+  } catch (error) {
+    locationStatus.textContent = error.message;
+  }
+}
+
+async function handleClearAdminFilters() {
+  state.adminFilters = {
+    employeeId: "",
+    vehiclePlate: "",
+    dateFrom: "",
+    dateTo: "",
+  };
+  renderEmployeeFilter();
+
+  try {
+    await loadRecords();
+    await loadSummary();
+    locationStatus.textContent = "Filtros administrativos limpos.";
+  } catch (error) {
+    locationStatus.textContent = error.message;
+  }
 }
 
 function handleToggleRegisterForm() {
@@ -422,6 +730,159 @@ function handleToggleRegisterForm() {
 
   state.showRegisterForm = !state.showRegisterForm;
   renderRegisterForm();
+}
+
+function handleEmployeeAdminClick(event) {
+  const button = event.target.closest("[data-manage-employee]");
+  if (!button) {
+    return;
+  }
+
+  state.managedEmployeeId = button.dataset.manageEmployee;
+  setEmployeeManagerMessage("");
+  renderManagedEmployees();
+}
+
+function handleCancelEmployeeEdit() {
+  state.managedEmployeeId = "";
+  setEmployeeManagerMessage("");
+  renderManagedEmployees();
+}
+
+async function handleVehicleRegister(event) {
+  event.preventDefault();
+
+  const payload = {
+    plate: registerVehiclePlateInput.value.trim().toUpperCase(),
+    description: registerVehicleDescriptionInput.value.trim(),
+    initialKm: registerVehicleInitialKmInput.value.trim(),
+  };
+
+  try {
+    const data = await api("/api/admin/vehicles", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    vehicleRegisterForm.reset();
+    setVehicleManagerMessage(`Veiculo ${data.vehicle.plate} cadastrado com sucesso.`);
+    state.showVehicleRegisterForm = false;
+    await loadVehicles();
+  } catch (error) {
+    setVehicleManagerMessage(error.message, true);
+  }
+}
+
+async function handleVehicleAdminClick(event) {
+  const button = event.target.closest("[data-delete-vehicle]");
+  if (!button) {
+    return;
+  }
+
+  const vehicle = state.vehicles.find((item) => String(item.id) === button.dataset.deleteVehicle);
+  if (!vehicle) {
+    return;
+  }
+
+  const confirmed = window.confirm(`Excluir o veiculo ${vehicle.plate}?`);
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await api(`/api/admin/vehicles/${vehicle.id}`, { method: "DELETE" });
+    setVehicleManagerMessage(`Veiculo ${vehicle.plate} excluido com sucesso.`);
+    await loadVehicles();
+  } catch (error) {
+    setVehicleManagerMessage(error.message, true);
+  }
+}
+
+function handleVehicleSelectionChange() {
+  const selectedPlate = vehicleSelectInput.value.trim().toUpperCase();
+  vehiclePlateInput.value = selectedPlate;
+  vehiclePlateInput.readOnly = Boolean(selectedPlate);
+}
+
+function handleToggleVehicleRegisterForm() {
+  if (state.user?.role !== "admin") {
+    return;
+  }
+
+  state.showVehicleRegisterForm = !state.showVehicleRegisterForm;
+  renderVehicles();
+}
+
+async function handleEmployeeEditSubmit(event) {
+  event.preventDefault();
+
+  const employeeId = manageEmployeeIdInput.value;
+  const payload = {
+    name: editEmployeeNameInput.value.trim(),
+    employeeId: editEmployeeIdInput.value.trim(),
+  };
+
+  try {
+    const data = await api(`/api/admin/employees/${employeeId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+    state.managedEmployeeId = data.employee.id;
+    setEmployeeManagerMessage(`Cadastro de ${data.employee.name} atualizado com sucesso.`);
+    await loadEmployees();
+    await loadRecords();
+    await loadSummary();
+  } catch (error) {
+    setEmployeeManagerMessage(error.message, true);
+  }
+}
+
+async function handleEmployeePasswordSubmit(event) {
+  event.preventDefault();
+
+  const employee = getManagedEmployee();
+  if (!employee) {
+    return;
+  }
+
+  const password = employeePasswordInput.value.trim();
+  if (!password) {
+    setEmployeeManagerMessage("Informe a nova senha.", true);
+    return;
+  }
+
+  try {
+    await api(`/api/admin/employees/${employee.id}/password`, {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    });
+    employeePasswordForm.reset();
+    setEmployeeManagerMessage(`Senha de ${employee.name} redefinida com sucesso.`);
+  } catch (error) {
+    setEmployeeManagerMessage(error.message, true);
+  }
+}
+
+async function handleDeleteEmployee() {
+  const employee = getManagedEmployee();
+  if (!employee) {
+    return;
+  }
+
+  const confirmed = window.confirm(`Excluir o funcionario ${employee.name} (${employee.employeeId})?`);
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await api(`/api/admin/employees/${employee.id}`, { method: "DELETE" });
+    state.managedEmployeeId = "";
+    setEmployeeManagerMessage(`Funcionario ${employee.name} excluido com sucesso.`);
+    await loadEmployees();
+    await loadRecords();
+    await loadSummary();
+  } catch (error) {
+    setEmployeeManagerMessage(error.message, true);
+  }
 }
 
 function handleVehicleSubmit(event) {
@@ -468,6 +929,15 @@ function handleVehicleDialogClose() {
   const resolve = vehicleDialogResolver;
   vehicleDialogResolver = null;
   resolve(null);
+}
+
+function bindEvent(node, eventName, handler) {
+  if (!node) {
+    console.warn(`Elemento nao encontrado para evento ${eventName}.`);
+    return;
+  }
+
+  node.addEventListener(eventName, handler);
 }
 
 async function registerPoint(action) {
@@ -518,16 +988,25 @@ async function registerPoint(action) {
   }
 }
 
-loginForm.addEventListener("submit", handleLogin);
-registerForm.addEventListener("submit", handleRegister);
-logoutButton.addEventListener("click", handleLogout);
-toggleFilterButton.addEventListener("click", handleToggleFilter);
-toggleRegisterButton.addEventListener("click", handleToggleRegisterForm);
-employeeFilter.addEventListener("change", handleEmployeeFilterChange);
-vehicleForm.addEventListener("submit", handleVehicleSubmit);
-vehicleCancelButton.addEventListener("click", handleVehicleCancel);
-vehicleDialog.addEventListener("cancel", handleVehicleCancel);
-vehicleDialog.addEventListener("close", handleVehicleDialogClose);
+bindEvent(loginForm, "submit", handleLogin);
+bindEvent(registerForm, "submit", handleRegister);
+bindEvent(logoutButton, "click", handleLogout);
+bindEvent(toggleRegisterButton, "click", handleToggleRegisterForm);
+bindEvent(toggleVehicleRegisterButton, "click", handleToggleVehicleRegisterForm);
+bindEvent(applyAdminFiltersButton, "click", handleApplyAdminFilters);
+bindEvent(clearAdminFiltersButton, "click", handleClearAdminFilters);
+bindEvent(employeeAdminBody, "click", handleEmployeeAdminClick);
+bindEvent(employeeEditForm, "submit", handleEmployeeEditSubmit);
+bindEvent(cancelEmployeeEditButton, "click", handleCancelEmployeeEdit);
+bindEvent(employeePasswordForm, "submit", handleEmployeePasswordSubmit);
+bindEvent(deleteEmployeeButton, "click", handleDeleteEmployee);
+bindEvent(vehicleRegisterForm, "submit", handleVehicleRegister);
+bindEvent(vehicleAdminBody, "click", handleVehicleAdminClick);
+bindEvent(vehicleForm, "submit", handleVehicleSubmit);
+bindEvent(vehicleSelectInput, "change", handleVehicleSelectionChange);
+bindEvent(vehicleCancelButton, "click", handleVehicleCancel);
+bindEvent(vehicleDialog, "cancel", handleVehicleCancel);
+bindEvent(vehicleDialog, "close", handleVehicleDialogClose);
 actionButtons.forEach((button) => {
   button.addEventListener("click", () => registerPoint(button.dataset.action));
 });

@@ -49,6 +49,10 @@ a {
   font: inherit;
 }
 
+select {
+  font: inherit;
+}
+
 .shell {
   position: relative;
   z-index: 1;
@@ -66,18 +70,6 @@ a {
   box-shadow: var(--shadow);
 }
 
-.hero {
-  padding: 28px;
-  margin-bottom: 20px;
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(240px, 360px);
-  gap: 22px;
-  align-items: center;
-  background:
-    linear-gradient(140deg, rgba(11, 90, 168, 0.12), rgba(211, 155, 57, 0.14)),
-    var(--surface);
-}
-
 .panel {
   padding: 20px;
   margin-bottom: 20px;
@@ -86,6 +78,10 @@ a {
 .auth-panel {
   display: grid;
   justify-items: center;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding-top: 28px;
 }
 
 .card {
@@ -93,7 +89,37 @@ a {
 }
 
 .auth-card {
-  width: min(100%, 480px);
+  width: min(100%, 920px);
+  padding: 30px;
+  background:
+    linear-gradient(145deg, rgba(11, 90, 168, 0.08), rgba(211, 155, 57, 0.08)),
+    rgba(255, 253, 249, 0.96);
+}
+
+.auth-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: start;
+  margin-bottom: 24px;
+}
+
+.auth-copy {
+  max-width: 560px;
+}
+
+.auth-title {
+  margin-bottom: 12px;
+  font-size: clamp(2rem, 6vw, 3.5rem);
+  line-height: 0.96;
+}
+
+.auth-lead {
+  margin-bottom: 18px;
+}
+
+.auth-form-block {
+  margin-bottom: 16px;
 }
 
 .grid-two {
@@ -152,66 +178,45 @@ h1 {
   font-weight: 600;
 }
 
-.brand-mark {
-  display: flex;
-  justify-content: center;
+.hero-brand {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
 }
 
 .brand-circle {
   width: min(100%, 320px);
   aspect-ratio: 1;
   border-radius: 50%;
-  border: 6px solid rgba(11, 90, 168, 0.95);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(228, 239, 247, 0.95));
-  box-shadow: inset 0 0 0 12px rgba(255, 255, 255, 0.72);
-  padding: 38px 24px 24px;
-  text-align: center;
+  background: transparent;
   display: grid;
-  align-content: center;
+  place-items: center;
 }
 
-.brand-lc {
-  display: flex;
-  align-items: end;
-  justify-content: center;
-  gap: 6px;
-  line-height: 0.8;
-  margin-bottom: 12px;
+.hero-brand-circle {
+  width: 190px;
+  overflow: hidden;
+  border: 4px solid #0b5aa8;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(11, 90, 168, 0.14);
 }
 
-.brand-l,
-.brand-c {
-  display: inline-block;
-  font-weight: 900;
-  font-size: clamp(4.2rem, 10vw, 7.2rem);
+.brand-logo-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
 }
 
-.brand-l {
-  color: var(--blue);
-}
-
-.brand-c {
-  color: var(--gold);
-}
-
-.brand-title {
-  margin-bottom: 8px;
-  color: var(--blue);
-  font-size: clamp(1.2rem, 3.2vw, 2.1rem);
-  font-weight: 900;
-  letter-spacing: 0.05em;
-}
-
-.brand-copy {
-  margin-bottom: 4px;
-  color: var(--blue);
-  font-size: clamp(0.85rem, 2.4vw, 1.1rem);
-  font-weight: 600;
-}
-
-.brand-copy.light {
-  color: #377ab8;
+.brand-caption {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.84rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
 }
 
 label {
@@ -227,7 +232,19 @@ input {
   background: rgba(255, 255, 255, 0.95);
 }
 
+select {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.95);
+}
+
 input:focus {
+  outline: 2px solid rgba(25, 107, 82, 0.18);
+  border-color: var(--green);
+}
+
+select:focus {
   outline: 2px solid rgba(25, 107, 82, 0.18);
   border-color: var(--green);
 }
@@ -284,9 +301,25 @@ button:hover,
 .section-head {
   display: flex;
   justify-content: space-between;
-  align-items: start;
+  align-items: center;
   gap: 16px;
   margin-bottom: 18px;
+}
+
+.app-brand-center {
+  display: flex;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.app-brand-image {
+  width: 92px;
+  height: 92px;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 4px solid #0b5aa8;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(11, 90, 168, 0.12);
 }
 
 .export-actions {
@@ -324,12 +357,25 @@ button:hover,
   max-width: 320px;
 }
 
+.admin-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
 .filter-label select {
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 12px 14px;
   background: rgba(255, 255, 255, 0.95);
   font: inherit;
+}
+
+.filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .admin-grid {
@@ -350,6 +396,60 @@ button:hover,
   justify-content: space-between;
   align-items: start;
   gap: 16px;
+}
+
+.manager-feedback {
+  margin: 0 0 14px;
+}
+
+.employee-table-wrap {
+  margin-bottom: 16px;
+}
+
+.employees-table {
+  min-width: 680px;
+}
+
+.employee-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.table-action {
+  padding: 10px 12px;
+  border-radius: 14px;
+}
+
+.employee-row-active td {
+  background: rgba(11, 90, 168, 0.07);
+}
+
+.employee-editor {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(245, 249, 255, 0.72);
+}
+
+.employee-editor-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 12px;
+}
+
+.employee-password-form {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.employee-danger-zone {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
 .record-card {
@@ -551,19 +651,17 @@ th {
 }
 
 @media (max-width: 780px) {
-  .hero {
-    grid-template-columns: 1fr;
-  }
-
   .grid-two,
-  .button-grid {
+  .button-grid,
+  .admin-filter-grid {
     grid-template-columns: 1fr;
   }
 
   .topbar,
   .section-head,
   .record-card,
-  .admin-block-head {
+  .admin-block-head,
+  .employee-editor-head {
     flex-direction: column;
     align-items: stretch;
   }
@@ -576,8 +674,16 @@ th {
     width: fit-content;
   }
 
-  .brand-circle {
-    width: min(100%, 260px);
+  .auth-card {
+    padding: 22px;
+  }
+
+  .auth-card-head {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-brand-circle {
+    width: 130px;
   }
 
   .dialog-actions {

@@ -24,8 +24,21 @@ create table if not exists public.time_records (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.vehicles (
+  id uuid primary key default gen_random_uuid(),
+  plate text not null unique,
+  description text,
+  initial_km double precision not null default 0,
+  current_km double precision not null default 0,
+  created_at timestamptz not null default now()
+);
+
 alter table public.time_records add column if not exists vehicle_plate text;
 alter table public.time_records add column if not exists vehicle_km double precision;
+alter table public.vehicles add column if not exists description text;
+alter table public.vehicles add column if not exists initial_km double precision not null default 0;
+alter table public.vehicles add column if not exists current_km double precision not null default 0;
 
 create index if not exists idx_time_records_user_id on public.time_records (user_id);
 create index if not exists idx_time_records_recorded_at on public.time_records (recorded_at desc);
+create index if not exists idx_vehicles_plate on public.vehicles (plate);

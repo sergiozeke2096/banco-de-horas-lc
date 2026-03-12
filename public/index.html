@@ -8,35 +8,31 @@
 </head>
 <body>
   <main class="shell">
-    <section class="hero">
-      <div>
-        <p class="eyebrow">LC Transporte</p>
-        <h1>Cartao de ponto profissional</h1>
-        <p class="lead">
-          Plataforma mobile para registrar jornada, armazenar dados centralizados e permitir auditoria completa do administrador.
-        </p>
-      </div>
-      <div class="brand-mark" aria-hidden="true">
-        <div class="brand-circle">
-          <div class="brand-lc">
-            <span class="brand-l">L</span>
-            <span class="brand-c">C</span>
-          </div>
-          <p class="brand-title">TRANSPORTES</p>
-          <p class="brand-copy">Coletas &amp; Entregas Urgentes</p>
-          <p class="brand-copy light">Regional e Interestadual</p>
-        </div>
-      </div>
-      <div class="hero-status" id="clockStatus">Carregando horario...</div>
-    </section>
-
     <section class="panel auth-panel" id="authPanel">
       <article class="card auth-card">
-        <h2>Entrar</h2>
-        <p class="muted">Funcionario e administrador entram com usuario e senha.</p>
+        <div class="auth-card-head">
+          <div class="auth-copy">
+            <p class="eyebrow">LC Transporte</p>
+            <h1 class="auth-title">Cartão de ponto LC</h1>
+            <p class="lead auth-lead">
+              
+            </p>
+            <div class="hero-status" id="clockStatus">Carregando horario...</div>
+          </div>
+          <div class="hero-brand" aria-hidden="true">
+            <div class="brand-circle hero-brand-circle">
+              <img class="brand-logo-image" src="/logo-lc.jpg" alt="LC Transportes">
+            </div>
+            <p class="brand-caption"></p>
+          </div>
+        </div>
+        <div class="auth-form-block">
+          <h2>Entrar</h2>
+          <p class="muted"></p>
+        </div>
         <form id="loginForm" class="stack">
           <label>
-            Usuario ou matricula
+            
             <input id="loginEmployeeId" type="text" placeholder="Ex.: 1024 ou Lc transporte" required>
           </label>
           <label>
@@ -56,6 +52,9 @@
           <h2 id="sessionTitle">Carregando...</h2>
           <p class="muted" id="sessionSubtitle"></p>
         </div>
+        <div class="app-brand-center" aria-hidden="true">
+          <img class="app-brand-image" src="/logo-lc.jpg" alt="LC Transportes">
+        </div>
         <button class="ghost" id="logoutButton">Sair</button>
       </div>
 
@@ -63,7 +62,6 @@
         <div class="section-head">
           <div>
             <h3>Registrar ponto</h3>
-            <p class="muted">Os registros ficam centralizados no sistema e vinculados ao funcionario autenticado.</p>
           </div>
           <span class="status" id="locationStatus">Aguardando acao.</span>
         </div>
@@ -75,41 +73,12 @@
         </div>
       </section>
 
-      <section class="card">
-        <div class="section-head">
-          <div>
-            <h3 id="recordsTitle">Registros</h3>
-            <p class="muted" id="recordsSubtitle"></p>
-          </div>
-          <div class="export-actions hidden" id="exportActions">
-            <button type="button" class="ghost" id="toggleFilterButton">Mostrar filtro</button>
-            <a class="ghost" id="exportXlsxLink" href="/api/admin/export.xlsx">Baixar planilha XLSX</a>
-          </div>
-        </div>
-        <div class="filter-panel hidden" id="recordsFilterPanel">
-          <label class="filter-label" for="employeeFilter">
-            Filtrar por matricula
-            <select id="employeeFilter">
-              <option value="">Todas as matriculas</option>
-            </select>
-          </label>
-        </div>
-        <div class="records" id="recordsList"></div>
-      </section>
-
       <section class="card hidden" id="adminPanel">
-        <div class="section-head">
-          <div>
-            <h3>Resumo administrativo</h3>
-            <p class="muted">Visao consolidada de todos os funcionarios por dia.</p>
-          </div>
-        </div>
         <div class="admin-grid">
           <article class="admin-block">
             <div class="admin-block-head">
               <div>
                 <h4>Cadastrar funcionario</h4>
-                <p class="muted">Somente o administrador pode criar novos acessos de funcionario.</p>
               </div>
               <button type="button" class="secondary" id="toggleRegisterButton">Novo cadastro</button>
             </div>
@@ -129,6 +98,110 @@
               <button type="submit" class="secondary">Cadastrar funcionario</button>
             </form>
           </article>
+          <article class="admin-block">
+            <div class="admin-block-head">
+              <div>
+                <h4>Cadastrar veiculo</h4>
+              </div>
+              <button type="button" class="secondary" id="toggleVehicleRegisterButton">Novo veiculo</button>
+            </div>
+            <form id="vehicleRegisterForm" class="stack hidden">
+              <label>
+                Placa
+                <input id="registerVehiclePlate" type="text" placeholder="Ex.: ABC1D23" maxlength="12" required>
+              </label>
+              <label>
+                Descricao
+                <input id="registerVehicleDescription" type="text" placeholder="Ex.: Fiorino branca">
+              </label>
+              <label>
+                KM inicial
+                <input id="registerVehicleInitialKm" type="number" min="0" step="0.1" placeholder="Ex.: 125430" required>
+              </label>
+              <button type="submit" class="secondary">Cadastrar veiculo</button>
+            </form>
+            <p class="feedback manager-feedback" id="vehicleManagerMessage"></p>
+            <div class="table-wrap employee-table-wrap">
+              <table class="employees-table">
+                <thead>
+                  <tr>
+                    <th>Placa</th>
+                    <th>Descricao</th>
+                    <th>KM inicial</th>
+                    <th>KM atual</th>
+                    <th>Acoes</th>
+                  </tr>
+                </thead>
+                <tbody id="vehicleAdminBody">
+                  <tr>
+                    <td colspan="5" class="empty-row">Nenhum veiculo cadastrado.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+          <article class="admin-block">
+            <div class="admin-block-head">
+              <div>
+                <h4>Gerenciar funcionarios</h4>
+              </div>
+            </div>
+            <p class="feedback manager-feedback" id="employeeManagerMessage"></p>
+            <div class="table-wrap employee-table-wrap">
+              <table class="employees-table">
+                <thead>
+                  <tr>
+                    <th>Funcionario</th>
+                    <th>Matricula</th>
+                    <th>Criado em</th>
+                    <th>Acoes</th>
+                  </tr>
+                </thead>
+                <tbody id="employeeAdminBody">
+                  <tr>
+                    <td colspan="4" class="empty-row">Nenhum funcionario cadastrado.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <section class="employee-editor hidden" id="employeeEditorPanel">
+              <div class="employee-editor-head">
+                <div>
+                  <p class="eyebrow small">Funcionario selecionado</p>
+                  <h4 id="employeeEditorTitle">Gerenciar funcionario</h4>
+                </div>
+                <button type="button" class="ghost" id="cancelEmployeeEditButton">Fechar</button>
+              </div>
+              <form id="employeeEditForm" class="stack">
+                <input id="manageEmployeeId" type="hidden">
+                <label>
+                  Nome completo
+                  <input id="editEmployeeName" type="text" placeholder="Ex.: Joao Silva" required>
+                </label>
+                <label>
+                  Matricula
+                  <input id="editEmployeeId" type="text" placeholder="Ex.: 1024" required>
+                </label>
+                <button type="submit" class="secondary">Salvar dados</button>
+              </form>
+              <form id="employeePasswordForm" class="stack employee-password-form">
+                <label>
+                  Nova senha
+                  <input id="employeePasswordInput" type="password" placeholder="Digite a nova senha" required>
+                </label>
+                <button type="submit" class="primary">Redefinir senha</button>
+              </form>
+              <div class="employee-danger-zone">
+                <p class="muted">A exclusao so e permitida para funcionarios sem registros vinculados.</p>
+                <button type="button" class="danger" id="deleteEmployeeButton">Excluir funcionario</button>
+              </div>
+            </section>
+          </article>
+        </div>
+        <div class="section-head">
+          <div>
+            <h3>Resumo administrativo</h3>
+          </div>
         </div>
         <div class="table-wrap">
           <table class="summary-table">
@@ -151,6 +224,45 @@
           </table>
         </div>
       </section>
+
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <h3 id="recordsTitle">Registros</h3>
+            <p class="muted" id="recordsSubtitle"></p>
+          </div>
+          <div class="export-actions hidden" id="exportActions">
+            <a class="ghost" id="exportXlsxLink" href="/api/admin/export.xlsx">Baixar planilha XLSX</a>
+          </div>
+        </div>
+        <div class="filter-panel" id="recordsFilterPanel">
+          <div class="admin-filter-grid">
+            <label class="filter-label" for="employeeFilter">
+              Filtrar por matricula
+              <select id="employeeFilter">
+                <option value="">Todas as matriculas</option>
+              </select>
+            </label>
+            <label class="filter-label" for="vehiclePlateFilter">
+              Filtrar por veiculo
+              <input id="vehiclePlateFilter" type="text" placeholder="Ex.: ABC1D23">
+            </label>
+            <label class="filter-label" for="dateFromFilter">
+              Data inicial
+              <input id="dateFromFilter" type="date">
+            </label>
+            <label class="filter-label" for="dateToFilter">
+              Data final
+              <input id="dateToFilter" type="date">
+            </label>
+          </div>
+          <div class="filter-actions">
+            <button type="button" class="secondary" id="applyAdminFiltersButton">Aplicar filtros</button>
+            <button type="button" class="ghost" id="clearAdminFiltersButton">Limpar filtros</button>
+          </div>
+        </div>
+        <div class="records" id="recordsList"></div>
+      </section>
     </section>
   </main>
 
@@ -171,8 +283,14 @@
       <div>
         <p class="eyebrow small">Dados do veiculo</p>
         <h3>Complete antes de registrar o ponto</h3>
-        <p class="muted">Informe a placa e o KM atual do veiculo utilizado.</p>
+        <p class="muted">Selecione um veiculo cadastrado ou informe a placa manualmente.</p>
       </div>
+      <label>
+        Veiculo cadastrado
+        <select id="vehicleSelectInput">
+          <option value="">Digite manualmente</option>
+        </select>
+      </label>
       <label>
         Placa do veiculo
         <input id="vehiclePlateInput" type="text" placeholder="Ex.: ABC1D23" maxlength="12" required>
