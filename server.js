@@ -812,7 +812,7 @@ function getAllowedNextActions(records) {
     return ["Retorno do almoco"];
   }
   if (lastAction === "Retorno do almoco") {
-    return ["Saida"];
+    return ["Saida para almoco", "Saida"];
   }
   if (lastAction === "Saida") {
     return ["Entrada"];
@@ -1043,6 +1043,10 @@ app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
 
   if (!vehiclePlate || vehicleKm === undefined || vehicleKm === null || Number.isNaN(Number(vehicleKm))) {
     return res.status(400).json({ error: "Informe a placa e o KM do veiculo." });
+  }
+
+  if (typeof latitude !== "number" || typeof longitude !== "number") {
+    return res.status(400).json({ error: "Ative a localizacao para registrar o ponto." });
   }
 
   const normalizedVehiclePlate = String(vehiclePlate).trim().toUpperCase();

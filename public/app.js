@@ -115,17 +115,16 @@ async function api(path, options = {}) {
   return response.text();
 }
 
-function formatLocation(record) {
-  if (typeof record.latitude === "number" && typeof record.longitude === "number") {
-    return `Lat ${record.latitude.toFixed(5)}, Long ${record.longitude.toFixed(5)}`;
-  }
-  return "Localizacao nao informada";
-}
-
 function formatVehicle(record) {
   const vehiclePlate = record.vehicle_plate ? String(record.vehicle_plate).toUpperCase() : "Nao informado";
   const vehicleKm = record.vehicle_km ?? "Nao informado";
   return `Veiculo: ${vehiclePlate} - KM: ${vehicleKm}`;
+}
+
+function formatActionLabel(action) {
+  return String(action || "")
+    .replaceAll("Saida para almoco", "Parada")
+    .replaceAll("Retorno do almoco", "Retorno");
 }
 
 function formatCreatedAt(value) {
@@ -200,15 +199,14 @@ function renderRecords() {
     const mapsUrl = createMapsUrl(record);
 
     node.querySelector(".record-title").textContent = title;
-    node.querySelector(".record-meta").textContent =
-      `${formatters.datetime.format(new Date(record.recorded_at))} - ${formatLocation(record)}`;
+    node.querySelector(".record-meta").textContent = formatters.datetime.format(new Date(record.recorded_at));
     node.querySelector(".record-vehicle").textContent = formatVehicle(record);
     if (mapsUrl) {
       const mapLink = node.querySelector(".record-map-link");
       mapLink.href = mapsUrl;
       mapLink.classList.remove("hidden");
     }
-    node.querySelector(".record-action").textContent = record.action;
+    node.querySelector(".record-action").textContent = formatActionLabel(record.action);
     recordsList.appendChild(node);
   }
 }
@@ -638,7 +636,7 @@ async function handleRegister(event) {
     await loadRecords();
     await loadSummary();
   } catch (error) {
-    locationStatus.textContent = error.message;
+    locationStatus.textContent = formatActionLabel(error.message);
   }
 }
 
@@ -964,7 +962,8 @@ async function registerPoint(action) {
       : `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
     locationStatus.textContent = "Localizacao capturada. Salvando registro...";
   } catch (_error) {
-    locationStatus.textContent = "Registro sera salvo sem localizacao.";
+    locationStatus.textContent = "Ative a localizacao do dispositivo para registrar o ponto.";
+    return;
   }
 
   try {

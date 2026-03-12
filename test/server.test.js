@@ -10,6 +10,11 @@ process.env.SUPABASE_URL = "";
 process.env.SUPABASE_SERVICE_ROLE_KEY = "";
 
 const app = require("../server");
+const defaultLocation = {
+  latitude: -23.55052,
+  longitude: -46.633308,
+  locationLabel: "Lat -23.55052, Long -46.63331",
+};
 
 beforeEach(() => {
   process.env.ADMIN_NAME = "Admin Teste";
@@ -45,6 +50,7 @@ async function createRecord(agent, overrides = {}) {
     localTime: "08:00:00",
     vehiclePlate: "ABC1D23",
     vehicleKm: 125430,
+    ...defaultLocation,
     ...overrides,
   };
 
@@ -94,6 +100,7 @@ test("backend rejeita uma saida como primeira batida do dia", async () => {
     localTime: "08:00:00",
     vehiclePlate: "ABC1D23",
     vehicleKm: 125430,
+    ...defaultLocation,
   });
 
   assert.equal(response.status, 409);
@@ -122,6 +129,7 @@ test("backend aceita sequencia valida completa de jornada", async () => {
       localDate: "11/03/2026",
       vehiclePlate: "DEF4G56",
       vehicleKm: 1000,
+      ...defaultLocation,
     });
 
     assert.equal(response.status, 201);
@@ -130,6 +138,81 @@ test("backend aceita sequencia valida completa de jornada", async () => {
   const listResponse = await employeeAgent.get("/api/me/records");
   assert.equal(listResponse.status, 200);
   assert.equal(listResponse.body.records.length, 4);
+});
+
+test("backend aceita mais de um almoco na mesma jornada", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  await registerEmployee(adminAgent, "4002");
+  await registerVehicle(adminAgent, "MUL1234", "Multiple lunch", 3000);
+
+  const employeeAgent = request.agent(app);
+  await login(employeeAgent, "4002", "senha-funcionario");
+
+  const records = [
+    { action: "Entrada", recordedAt: "2026-03-11T08:00:00.000Z", localTime: "08:00:00", vehicleKm: 3000 },
+    { action: "Saida para almoco", recordedAt: "2026-03-11T10:00:00.000Z", localTime: "10:00:00", vehicleKm: 3010 },
+    { action: "Retorno do almoco", recordedAt: "2026-03-11T10:15:00.000Z", localTime: "10:15:00", vehicleKm: 3010 },
+    { action: "Saida para almoco", recordedAt: "2026-03-11T12:00:00.000Z", localTime: "12:00:00", vehicleKm: 3020 },
+    { action: "Retorno do almoco", recordedAt: "2026-03-11T13:00:00.000Z", localTime: "13:00:00", vehicleKm: 3020 },
+    { action: "Saida", recordedAt: "2026-03-11T17:00:00.000Z", localTime: "17:00:00", vehicleKm: 3040 },
+  ];
+
+  for (const record of records) {
+    const response = await employeeAgent.post("/api/me/records").send({
+      ...record,
+      localDate: "11/03/2026",
+      vehiclePlate: "MUL1234",
+      ...defaultLocation,
+    });
+    assert.equal(response.status, 201);
+  }
+
+  const summaryResponse = await adminAgent.get("/api/admin/summary").query({
+    employeeId: "4002",
+    dateFrom: "2026-03-11",
+    dateTo: "2026-03-11",
+  });
+  assert.equal(summaryResponse.status, 200);
+  assert.equal(summaryResponse.body.summary.length, 1);
+  assert.equal(summaryResponse.body.summary[0].workedHours, "07:45");
+  assert.equal(summaryResponse.body.summary[0].intervalHours, "01:15");
+});
+
+test("backend aceita mais de um ciclo de inicio e fim no mesmo dia", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  await registerEmployee(adminAgent, "4003");
+  await registerVehicle(adminAgent, "CIC1234", "Multiple cycles", 5000);
+
+  const employeeAgent = request.agent(app);
+  await login(employeeAgent, "4003", "senha-funcionario");
+
+  const records = [
+    { action: "Entrada", recordedAt: "2026-03-11T08:00:00.000Z", localTime: "08:00:00", vehicleKm: 5000 },
+    { action: "Saida", recordedAt: "2026-03-11T12:00:00.000Z", localTime: "12:00:00", vehicleKm: 5020 },
+    { action: "Entrada", recordedAt: "2026-03-11T13:00:00.000Z", localTime: "13:00:00", vehicleKm: 5020 },
+    { action: "Saida", recordedAt: "2026-03-11T17:00:00.000Z", localTime: "17:00:00", vehicleKm: 5050 },
+  ];
+
+  for (const record of records) {
+    const response = await employeeAgent.post("/api/me/records").send({
+      ...record,
+      localDate: "11/03/2026",
+      vehiclePlate: "CIC1234",
+      ...defaultLocation,
+    });
+    assert.equal(response.status, 201);
+  }
+
+  const summaryResponse = await adminAgent.get("/api/admin/summary").query({
+    employeeId: "4003",
+    dateFrom: "2026-03-11",
+    dateTo: "2026-03-11",
+  });
+  assert.equal(summaryResponse.status, 200);
+  assert.equal(summaryResponse.body.summary.length, 1);
+  assert.equal(summaryResponse.body.summary[0].workedHours, "08:00");
 });
 
 test("backend aceita jornada noturna cruzando meia-noite e consolida no dia de entrada", async () => {
@@ -148,6 +231,7 @@ test("backend aceita jornada noturna cruzando meia-noite e consolida no dia de e
     localTime: "22:00:00",
     vehiclePlate: "NOT1234",
     vehicleKm: 1500,
+    ...defaultLocation,
   });
   assert.equal(entryResponse.status, 201);
 
@@ -158,6 +242,7 @@ test("backend aceita jornada noturna cruzando meia-noite e consolida no dia de e
     localTime: "06:00:00",
     vehiclePlate: "NOT1234",
     vehicleKm: 1515,
+    ...defaultLocation,
   });
   assert.equal(exitResponse.status, 201);
 
@@ -189,6 +274,7 @@ test("backend rejeita almoco em duplicidade sem retorno", async () => {
     localTime: "08:00:00",
     vehiclePlate: "HIJ7K89",
     vehicleKm: 2000,
+    ...defaultLocation,
   });
   assert.equal(firstEntry.status, 201);
 
@@ -199,6 +285,7 @@ test("backend rejeita almoco em duplicidade sem retorno", async () => {
     localTime: "12:00:00",
     vehiclePlate: "HIJ7K89",
     vehicleKm: 2010,
+    ...defaultLocation,
   });
   assert.equal(lunchStart.status, 201);
 
@@ -209,6 +296,7 @@ test("backend rejeita almoco em duplicidade sem retorno", async () => {
     localTime: "12:30:00",
     vehiclePlate: "HIJ7K89",
     vehicleKm: 2012,
+    ...defaultLocation,
   });
 
   assert.equal(invalidDuplicate.status, 409);
@@ -230,10 +318,33 @@ test("backend rejeita registro com veiculo nao cadastrado", async () => {
     localTime: "08:00:00",
     vehiclePlate: "ZZZ0000",
     vehicleKm: 1000,
+    ...defaultLocation,
   });
 
   assert.equal(response.status, 409);
   assert.match(response.body.error, /veiculo cadastrado/i);
+});
+
+test("backend rejeita registro sem localizacao ativa", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  await registerEmployee(adminAgent, "5011");
+  await registerVehicle(adminAgent, "LOC1234", "Veiculo localizacao", 1000);
+
+  const employeeAgent = request.agent(app);
+  await login(employeeAgent, "5011", "senha-funcionario");
+
+  const response = await employeeAgent.post("/api/me/records").send({
+    action: "Entrada",
+    recordedAt: "2026-03-11T08:00:00.000Z",
+    localDate: "11/03/2026",
+    localTime: "08:00:00",
+    vehiclePlate: "LOC1234",
+    vehicleKm: 1000,
+  });
+
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /ative a localizacao/i);
 });
 
 test("admin consegue editar funcionario e sincronizar identificacao nos registros", async () => {
