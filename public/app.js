@@ -78,6 +78,34 @@ const actionButtons = [...document.querySelectorAll(".action-button")];
 let vehicleDialogResolver = null;
 const MAX_ACTION_SLOTS = 5;
 
+function syncResponsiveTable(table) {
+  if (!table) {
+    return;
+  }
+
+  const headers = [...table.querySelectorAll("thead th")].map((header) => header.textContent.trim());
+  const rows = table.querySelectorAll("tbody tr");
+
+  rows.forEach((row) => {
+    [...row.children].forEach((cell, index) => {
+      if (cell.tagName !== "TD") {
+        return;
+      }
+
+      if (cell.classList.contains("empty-row") || cell.colSpan > 1) {
+        cell.removeAttribute("data-label");
+        return;
+      }
+
+      cell.setAttribute("data-label", headers[index] || "");
+    });
+  });
+}
+
+function syncResponsiveTables() {
+  document.querySelectorAll("table").forEach(syncResponsiveTable);
+}
+
 function setMessage(message, isError = false) {
   authMessage.textContent = message;
   authMessage.style.color = isError ? "#a33f33" : "";
@@ -283,6 +311,7 @@ function renderManagedEmployees() {
     employeeAdminBody.innerHTML = "";
     setEmployeeManagerMessage("");
     renderEmployeeEditor();
+    syncResponsiveTables();
     return;
   }
 
@@ -296,6 +325,7 @@ function renderManagedEmployees() {
   if (!state.employees.length) {
     employeeAdminBody.innerHTML = '<tr><td colspan="4" class="empty-row">Nenhum funcionario cadastrado.</td></tr>';
     renderEmployeeEditor();
+    syncResponsiveTables();
     return;
   }
 
@@ -331,6 +361,7 @@ function renderManagedEmployees() {
   }
 
   renderEmployeeEditor();
+  syncResponsiveTables();
 }
 
 function renderVehicles() {
@@ -352,6 +383,7 @@ function renderVehicles() {
     vehicleAdminBody.innerHTML = "";
     state.showVehicleRegisterForm = false;
     vehicleRegisterForm.classList.add("hidden");
+    syncResponsiveTables();
     return;
   }
 
@@ -367,6 +399,7 @@ function renderVehicles() {
 
   if (!state.vehicles.length) {
     vehicleAdminBody.innerHTML = '<tr><td colspan="5" class="empty-row">Nenhum veiculo cadastrado.</td></tr>';
+    syncResponsiveTables();
     return;
   }
 
@@ -385,6 +418,8 @@ function renderVehicles() {
     `;
     vehicleAdminBody.appendChild(row);
   }
+
+  syncResponsiveTables();
 }
 
 function updateExportLinks() {
@@ -412,6 +447,7 @@ function renderSummary() {
   summaryBody.innerHTML = "";
   if (!visibleSummary.length) {
     summaryBody.innerHTML = '<tr><td colspan="7" class="empty-row">Nenhum resumo disponivel para hoje.</td></tr>';
+    syncResponsiveTables();
     return;
   }
 
@@ -450,6 +486,8 @@ function renderSummary() {
     }
     summaryBody.appendChild(row);
   }
+
+  syncResponsiveTables();
 }
 
 function renderSession() {
@@ -1012,6 +1050,7 @@ actionButtons.forEach((button) => {
 
 updateClock();
 setInterval(updateClock, 1000);
+syncResponsiveTables();
 loadSession().catch((error) => {
   setMessage(error.message, true);
 });
