@@ -9,9 +9,17 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22.22.0
+      - key: NODE_ENV
+        value: production
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: ADMIN_NAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
       - key: SESSION_SECRET
         sync: false
+      - key: ALLOW_LOCAL_STORAGE_FALLBACK
+        value: "false"
