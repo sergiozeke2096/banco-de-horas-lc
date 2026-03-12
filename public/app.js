@@ -71,7 +71,6 @@ const vehicleAdminBody = document.querySelector("#vehicleAdminBody");
 const vehicleDialog = document.querySelector("#vehicleDialog");
 const vehicleForm = document.querySelector("#vehicleForm");
 const vehicleSelectInput = document.querySelector("#vehicleSelectInput");
-const vehiclePlateInput = document.querySelector("#vehiclePlateInput");
 const vehicleKmInput = document.querySelector("#vehicleKmInput");
 const vehicleFormMessage = document.querySelector("#vehicleFormMessage");
 const vehicleCancelButton = document.querySelector("#vehicleCancelButton");
@@ -338,7 +337,7 @@ function renderManagedEmployees() {
 
 function renderVehicles() {
   if (vehicleSelectInput) {
-    vehicleSelectInput.innerHTML = '<option value="">Digite manualmente</option>';
+    vehicleSelectInput.innerHTML = '<option value="">Selecione uma placa</option>';
     for (const vehicle of state.vehicles) {
       const option = document.createElement("option");
       option.value = vehicle.plate;
@@ -598,18 +597,21 @@ async function getBestCurrentPosition() {
 }
 
 function collectVehicleInfo() {
+  if (!state.vehicles.length) {
+    return Promise.resolve(null);
+  }
+
   vehicleForm.reset();
   vehicleFormMessage.textContent = "";
   if (vehicleSelectInput) {
     vehicleSelectInput.value = "";
   }
-  vehiclePlateInput.readOnly = false;
   renderVehicles();
 
   return new Promise((resolve) => {
     vehicleDialogResolver = resolve;
     vehicleDialog.showModal();
-    vehiclePlateInput.focus();
+    vehicleSelectInput.focus();
   });
 }
 
@@ -797,12 +799,6 @@ async function handleVehicleAdminClick(event) {
   }
 }
 
-function handleVehicleSelectionChange() {
-  const selectedPlate = vehicleSelectInput.value.trim().toUpperCase();
-  vehiclePlateInput.value = selectedPlate;
-  vehiclePlateInput.readOnly = Boolean(selectedPlate);
-}
-
 function handleToggleVehicleRegisterForm() {
   if (state.user?.role !== "admin") {
     return;
@@ -888,11 +884,11 @@ async function handleDeleteEmployee() {
 function handleVehicleSubmit(event) {
   event.preventDefault();
 
-  const vehiclePlate = vehiclePlateInput.value.trim().toUpperCase();
+  const vehiclePlate = vehicleSelectInput.value.trim().toUpperCase();
   const vehicleKm = vehicleKmInput.value.trim();
 
   if (!vehiclePlate || !vehicleKm) {
-    vehicleFormMessage.textContent = "Informe a placa e o KM do veiculo.";
+    vehicleFormMessage.textContent = "Selecione o veiculo e informe o KM atual.";
     return;
   }
 
@@ -941,6 +937,11 @@ function bindEvent(node, eventName, handler) {
 }
 
 async function registerPoint(action) {
+  if (!state.vehicles.length) {
+    locationStatus.textContent = "Nenhum veiculo cadastrado. Procure o administrador.";
+    return;
+  }
+
   const vehicleInfo = await collectVehicleInfo();
   if (!vehicleInfo) {
     locationStatus.textContent = "Registro cancelado.";
@@ -1003,7 +1004,6 @@ bindEvent(deleteEmployeeButton, "click", handleDeleteEmployee);
 bindEvent(vehicleRegisterForm, "submit", handleVehicleRegister);
 bindEvent(vehicleAdminBody, "click", handleVehicleAdminClick);
 bindEvent(vehicleForm, "submit", handleVehicleSubmit);
-bindEvent(vehicleSelectInput, "change", handleVehicleSelectionChange);
 bindEvent(vehicleCancelButton, "click", handleVehicleCancel);
 bindEvent(vehicleDialog, "cancel", handleVehicleCancel);
 bindEvent(vehicleDialog, "close", handleVehicleDialogClose);

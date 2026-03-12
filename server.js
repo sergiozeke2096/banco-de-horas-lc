@@ -1049,6 +1049,10 @@ app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
   const numericVehicleKm = Number(vehicleKm);
   const registeredVehicle = await getVehicleByPlate(normalizedVehiclePlate);
 
+  if (!registeredVehicle) {
+    return res.status(409).json({ error: "Selecione um veiculo cadastrado." });
+  }
+
   if (registeredVehicle && numericVehicleKm < Number(registeredVehicle.current_km ?? 0)) {
     return res.status(409).json({
       error: `O KM informado nao pode ser menor que o KM atual do veiculo (${registeredVehicle.current_km}).`,

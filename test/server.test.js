@@ -82,6 +82,7 @@ test("backend rejeita uma saida como primeira batida do dia", async () => {
   const adminAgent = request.agent(app);
   await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
   await registerEmployee(adminAgent, "3001");
+  await registerVehicle(adminAgent, "ABC1D23", "Utilitario 3001", 120000);
 
   const employeeAgent = request.agent(app);
   await login(employeeAgent, "3001", "senha-funcionario");
@@ -103,6 +104,7 @@ test("backend aceita sequencia valida completa de jornada", async () => {
   const adminAgent = request.agent(app);
   await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
   await registerEmployee(adminAgent, "4001");
+  await registerVehicle(adminAgent, "DEF4G56", "Van 4001", 1000);
 
   const employeeAgent = request.agent(app);
   await login(employeeAgent, "4001", "senha-funcionario");
@@ -134,6 +136,7 @@ test("backend aceita jornada noturna cruzando meia-noite e consolida no dia de e
   const adminAgent = request.agent(app);
   await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
   await registerEmployee(adminAgent, "4010");
+  await registerVehicle(adminAgent, "NOT1234", "Noturno", 1500);
 
   const employeeAgent = request.agent(app);
   await login(employeeAgent, "4010", "senha-funcionario");
@@ -174,6 +177,7 @@ test("backend rejeita almoco em duplicidade sem retorno", async () => {
   const adminAgent = request.agent(app);
   await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
   await registerEmployee(adminAgent, "5001");
+  await registerVehicle(adminAgent, "HIJ7K89", "Fiorino 5001", 2000);
 
   const employeeAgent = request.agent(app);
   await login(employeeAgent, "5001", "senha-funcionario");
@@ -211,10 +215,32 @@ test("backend rejeita almoco em duplicidade sem retorno", async () => {
   assert.match(invalidDuplicate.body.error, /Retorno do almoco/i);
 });
 
+test("backend rejeita registro com veiculo nao cadastrado", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  await registerEmployee(adminAgent, "5010");
+
+  const employeeAgent = request.agent(app);
+  await login(employeeAgent, "5010", "senha-funcionario");
+
+  const response = await employeeAgent.post("/api/me/records").send({
+    action: "Entrada",
+    recordedAt: "2026-03-11T08:00:00.000Z",
+    localDate: "11/03/2026",
+    localTime: "08:00:00",
+    vehiclePlate: "ZZZ0000",
+    vehicleKm: 1000,
+  });
+
+  assert.equal(response.status, 409);
+  assert.match(response.body.error, /veiculo cadastrado/i);
+});
+
 test("admin consegue editar funcionario e sincronizar identificacao nos registros", async () => {
   const adminAgent = request.agent(app);
   await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
   const employee = await registerEmployee(adminAgent, "6001");
+  await registerVehicle(adminAgent, "ABC1D23", "Utilitario 6001", 125430);
 
   const employeeAgent = request.agent(app);
   await login(employeeAgent, "6001", "senha-funcionario");
@@ -282,6 +308,7 @@ test("admin nao consegue excluir funcionario com registros", async () => {
   const adminAgent = request.agent(app);
   await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
   const employee = await registerEmployee(adminAgent, "9001");
+  await registerVehicle(adminAgent, "ABC1D23", "Utilitario 9001", 125430);
 
   const employeeAgent = request.agent(app);
   await login(employeeAgent, "9001", "senha-funcionario");
@@ -373,6 +400,9 @@ test("filtros administrativos recortam registros e resumo por funcionario, veicu
 
   await registerEmployee(adminAgent, "9101");
   await registerEmployee(adminAgent, "9102");
+  await registerVehicle(adminAgent, "AAA1B11", "Veiculo A", 100);
+  await registerVehicle(adminAgent, "BBB2C22", "Veiculo B", 200);
+  await registerVehicle(adminAgent, "CCC3D33", "Veiculo C", 300);
 
   const employeeOneAgent = request.agent(app);
   await login(employeeOneAgent, "9101", "senha-funcionario");
@@ -438,6 +468,8 @@ test("exportacoes CSV e XLSX respeitam os filtros administrativos", async () => 
   await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
   await registerEmployee(adminAgent, "9201");
   await registerEmployee(adminAgent, "9202");
+  await registerVehicle(adminAgent, "FILT123", "Filtro principal", 400);
+  await registerVehicle(adminAgent, "OUTR456", "Outro veiculo", 500);
 
   const employeeOneAgent = request.agent(app);
   await login(employeeOneAgent, "9201", "senha-funcionario");
