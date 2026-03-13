@@ -90,6 +90,51 @@ function allowLocalStorageFallback() {
   return process.env.ALLOW_LOCAL_STORAGE_FALLBACK === "true";
 }
 
+async function validateSupabaseSchema() {
+  const checks = [
+    {
+      table: "users",
+      query: supabase
+        .from("users")
+        .select("id, name, employee_id, password_hash, role", { head: true, count: "exact" })
+        .limit(1),
+    },
+    {
+      table: "time_records",
+      query: supabase
+        .from("time_records")
+        .select(
+          "id, user_id, employee_name, employee_id, action, recorded_at, local_date, local_time, vehicle_plate, vehicle_km",
+          { head: true, count: "exact" }
+        )
+        .limit(1),
+    },
+    {
+      table: "vehicles",
+      query: supabase
+        .from("vehicles")
+        .select("id, plate, description, initial_km, current_km", { head: true, count: "exact" })
+        .limit(1),
+    },
+  ];
+
+  const failures = [];
+
+  for (const check of checks) {
+    try {
+      await runQuery(check.query);
+    } catch (error) {
+      failures.push(`${check.table}: ${error.message}`);
+    }
+  }
+
+  if (failures.length) {
+    throw new Error(
+      `Schema do Supabase incompleto ou desatualizado. Execute supabase/schema.sql. Detalhes: ${failures.join(" | ")}`
+    );
+  }
+}
+
 function ensureRuntimeConfig() {
   const missing = [];
   const admin = getAdminConfig();
@@ -457,7 +502,7 @@ async function initializeStorage() {
           autoRefreshToken: false,
         },
       });
-      await runQuery(supabase.from("users").select("id").limit(1));
+      await validateSupabaseSchema();
       storageMode = "supabase";
       return;
     } catch (error) {
