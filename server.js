@@ -24,6 +24,11 @@ let localRecordSequence = 1;
 let localVehicleSequence = 1;
 let initializationPromise = null;
 
+const trustProxyValue = process.env.TRUST_PROXY;
+if (trustProxyValue) {
+  app.set("trust proxy", /^\d+$/.test(trustProxyValue) ? Number(trustProxyValue) : trustProxyValue);
+}
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, "public"), {
@@ -88,6 +93,18 @@ function allowLocalStorageFallback() {
   }
 
   return process.env.ALLOW_LOCAL_STORAGE_FALLBACK === "true";
+}
+
+function shouldUseSecureCookies() {
+  if (process.env.COOKIE_SECURE === "true") {
+    return true;
+  }
+
+  if (process.env.COOKIE_SECURE === "false") {
+    return false;
+  }
+
+  return process.env.NODE_ENV === "production";
 }
 
 async function validateSupabaseSchema() {
@@ -345,7 +362,7 @@ function setAuthCookie(res, user) {
   res.cookie(AUTH_COOKIE_NAME, createAuthCookieValue(user), {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookies(),
     maxAge: AUTH_DURATION_MS,
     path: "/",
   });
@@ -355,7 +372,7 @@ function clearAuthCookie(res) {
   res.clearCookie(AUTH_COOKIE_NAME, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookies(),
     path: "/",
   });
 }

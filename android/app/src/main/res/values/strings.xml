@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">LC Transporte</string>
+    <string name="title_activity_main">LC Transporte</string>
+    <string name="package_name">com.lctransporte.bancodehoras</string>
+    <string name="custom_url_scheme">com.lctransporte.bancodehoras</string>
+</resources>

@@ -46,6 +46,7 @@ const clearAdminFiltersButton = document.querySelector("#clearAdminFiltersButton
 const exportXlsxLink = document.querySelector("#exportXlsxLink");
 const recordTemplate = document.querySelector("#recordTemplate");
 const loginForm = document.querySelector("#loginForm");
+const loginSubmitButton = loginForm?.querySelector('button[type="submit"]');
 const registerForm = document.querySelector("#registerForm");
 const toggleRegisterButton = document.querySelector("#toggleRegisterButton");
 const logoutButton = document.querySelector("#logoutButton");
@@ -77,6 +78,24 @@ const vehicleCancelButton = document.querySelector("#vehicleCancelButton");
 const actionButtons = [...document.querySelectorAll(".action-button")];
 let vehicleDialogResolver = null;
 const MAX_ACTION_SLOTS = 5;
+
+function isUnconfiguredAndroidShell() {
+  return navigator.userAgent.includes("LCAndroidShell/1.0") && window.location.hostname === "localhost";
+}
+
+function showAndroidShellNotice() {
+  if (loginSubmitButton) {
+    loginSubmitButton.disabled = true;
+    loginSubmitButton.textContent = "Configurar app Android";
+  }
+
+  document.querySelector("#loginEmployeeId")?.setAttribute("disabled", "disabled");
+  document.querySelector("#loginPassword")?.setAttribute("disabled", "disabled");
+  setMessage(
+    "Este APK precisa apontar para a versao online do sistema. Configure ANDROID_APP_URL, execute npm run android:sync e gere o app novamente.",
+    true
+  );
+}
 
 function syncResponsiveTable(table) {
   if (!table) {
@@ -1051,6 +1070,11 @@ actionButtons.forEach((button) => {
 updateClock();
 setInterval(updateClock, 1000);
 syncResponsiveTables();
-loadSession().catch((error) => {
-  setMessage(error.message, true);
-});
+
+if (isUnconfiguredAndroidShell()) {
+  showAndroidShellNotice();
+} else {
+  loadSession().catch((error) => {
+    setMessage(error.message, true);
+  });
+}

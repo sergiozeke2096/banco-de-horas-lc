@@ -1,0 +1,11 @@
+node_modules
+.git
+.env
+android
+test
+coverage
+server-runtime.log
+server-runtime-2.log
+export-*.xlsx
+*.apk
+*.aab
