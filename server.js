@@ -5,23 +5,33 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const path = require("path");
 const { createClient } = require("@supabase/supabase-js");
-const { computeSummary, createWorkbook } = require("./lib/timecard-workbook");
+const { computeSummary, aggregateSummaryByEmployee, createWorkbook } = require("./lib/timecard-workbook");
+const { detectPendingAlerts, summarizeAlerts, DEFAULT_ALERT_THRESHOLDS } = require("./lib/pending-alerts");
 
 const LEGACY_ADMIN_NAME = "Lc tranporte";
 const SESSION_SECRET = process.env.SESSION_SECRET || "timecard-professional-secret";
 const PORT = Number(process.env.PORT || 3000);
 const AUTH_COOKIE_NAME = "lc_transportes_auth";
 const AUTH_DURATION_MS = 1000 * 60 * 60 * 12;
+const SIGNED_EXPORT_DURATION_MS = 1000 * 60 * 5;
+const SUPABASE_PAGE_SIZE = 1000;
+const TIME_RECORD_ACTIONS = ["Entrada", "Saida para almoco", "Retorno do almoco", "Saida"];
+const APP_TIME_ZONE = "America/Sao_Paulo";
+const localDateFormatter = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeZone: APP_TIME_ZONE });
+const localTimeFormatter = new Intl.DateTimeFormat("pt-BR", { timeStyle: "medium", timeZone: APP_TIME_ZONE });
 
 const app = express();
+let serverInstance = null;
 let storageMode = "local";
 let supabase = null;
 let localUsers = [];
 let localRecords = [];
 let localVehicles = [];
+let localVehicleTransfers = [];
 let localUserSequence = 1;
 let localRecordSequence = 1;
 let localVehicleSequence = 1;
+let localVehicleTransferSequence = 1;
 let initializationPromise = null;
 
 const trustProxyValue = process.env.TRUST_PROXY;
@@ -69,6 +79,37 @@ function serializeVehicle(vehicle) {
   };
 }
 
+function serializeVehicleWithUsage(vehicle, usage) {
+  const baseVehicle = serializeVehicle(vehicle);
+  return {
+    ...baseVehicle,
+    inUse: Boolean(usage),
+    inUseByOtherEmployee: Boolean(usage),
+    inUseBy: usage
+      ? {
+        userId: usage.userId,
+        employeeId: usage.employeeId,
+        employeeName: usage.employeeName,
+      }
+      : null,
+  };
+}
+
+function serializeVehicleContext(context) {
+  return {
+    activeJourney: Boolean(context?.activeJourney),
+    journeyStartedAt: context?.journeyStartedAt || null,
+    lastEventAt: context?.lastEventAt || null,
+    currentVehicle: context?.currentVehicle
+      ? {
+        plate: context.currentVehicle.plate,
+        km: context.currentVehicle.km,
+        source: context.currentVehicle.source,
+      }
+      : null,
+  };
+}
+
 function isSameEntityId(left, right) {
   return String(left) === String(right);
 }
@@ -85,6 +126,22 @@ function getAdminConfig() {
     name: String(process.env.ADMIN_NAME || "").trim(),
     password: String(process.env.ADMIN_PASSWORD || ""),
   };
+}
+
+function normalizeLoginIdentifier(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function getAdminLoginIdentifiers() {
+  return Array.from(new Set(
+    [getAdminConfig().name, LEGACY_ADMIN_NAME, "admin", "adm"]
+      .map((value) => normalizeLoginIdentifier(value))
+      .filter(Boolean)
+  ));
+}
+
+function isAdminLoginIdentifier(value) {
+  return getAdminLoginIdentifiers().includes(normalizeLoginIdentifier(value));
 }
 
 function allowLocalStorageFallback() {
@@ -131,6 +188,16 @@ async function validateSupabaseSchema() {
       query: supabase
         .from("vehicles")
         .select("id, plate, description, initial_km, current_km", { head: true, count: "exact" })
+        .limit(1),
+    },
+    {
+      table: "vehicle_transfers",
+      query: supabase
+        .from("vehicle_transfers")
+        .select(
+          "id, user_id, employee_name, employee_id, from_vehicle_plate, from_vehicle_km, to_vehicle_plate, to_vehicle_km, recorded_at, local_date, local_time",
+          { head: true, count: "exact" }
+        )
         .limit(1),
     },
   ];
@@ -182,6 +249,22 @@ async function runQuery(query) {
     throw error;
   }
   return data;
+}
+
+async function listSupabaseRows(queryFactory) {
+  const rows = [];
+  let from = 0;
+
+  while (true) {
+    const page = await runQuery(queryFactory().range(from, from + SUPABASE_PAGE_SIZE - 1));
+    rows.push(...page);
+
+    if (page.length < SUPABASE_PAGE_SIZE) {
+      return rows;
+    }
+
+    from += SUPABASE_PAGE_SIZE;
+  }
 }
 
 function asyncRoute(handler) {
@@ -281,6 +364,14 @@ function applyRecordFilters(records, filters) {
   return records.filter((record) => matchesRecordFilters(record, filters));
 }
 
+function filterSummaryWithinLastHours(summaryItems, hours, now = Date.now()) {
+  const cutoff = Number(now) - (Number(hours) * 60 * 60 * 1000);
+  return summaryItems.filter((item) => {
+    const lastEventAt = new Date(item.lastEventAt).getTime();
+    return !Number.isNaN(lastEventAt) && lastEventAt >= cutoff;
+  });
+}
+
 function buildFilterQueryString(filters) {
   const params = new URLSearchParams();
 
@@ -304,11 +395,74 @@ function buildFilterQueryString(filters) {
   return queryString ? `?${queryString}` : "";
 }
 
+function getFiltersWithoutVehicle(filters) {
+  return {
+    ...filters,
+    vehiclePlate: "",
+  };
+}
+
+function matchesTransferFilters(transfer, filters = {}, options = {}) {
+  const includeVehicle = options.includeVehicle !== false;
+
+  if (filters.employeeId && String(transfer.employee_id || "").trim() !== filters.employeeId) {
+    return false;
+  }
+
+  if (includeVehicle && filters.vehiclePlate) {
+    const normalizedFromPlate = String(transfer.from_vehicle_plate || "").trim().toUpperCase();
+    const normalizedToPlate = String(transfer.to_vehicle_plate || "").trim().toUpperCase();
+    if (normalizedFromPlate !== filters.vehiclePlate && normalizedToPlate !== filters.vehiclePlate) {
+      return false;
+    }
+  }
+
+  if (filters.fromDate || filters.toDate) {
+    const transferDate = resolveRecordFilterDate(transfer);
+    if (Number.isNaN(transferDate.getTime())) {
+      return false;
+    }
+
+    if (filters.fromDate && transferDate.getTime() < filters.fromDate.getTime()) {
+      return false;
+    }
+
+    if (filters.toDate && transferDate.getTime() > filters.toDate.getTime()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function compareTimelineEntries(left, right) {
+  const recordedAtCompare = String(left.recorded_at || "").localeCompare(String(right.recorded_at || ""), "pt-BR");
+  if (recordedAtCompare !== 0) {
+    return recordedAtCompare;
+  }
+
+  const localDateCompare = String(left.local_date || "").localeCompare(String(right.local_date || ""), "pt-BR");
+  if (localDateCompare !== 0) {
+    return localDateCompare;
+  }
+
+  const localTimeCompare = String(left.local_time || "").localeCompare(String(right.local_time || ""), "pt-BR");
+  if (localTimeCompare !== 0) {
+    return localTimeCompare;
+  }
+
+  return String(left.created_at || "").localeCompare(String(right.created_at || ""), "pt-BR");
+}
+
 function createAuthCookieValue(user) {
   const payload = {
     user,
     exp: Date.now() + AUTH_DURATION_MS,
   };
+  return createSignedPayloadValue(payload);
+}
+
+function createSignedPayloadValue(payload) {
   const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const signature = crypto.createHmac("sha256", SESSION_SECRET).update(encodedPayload).digest("base64url");
   return `${encodedPayload}.${signature}`;
@@ -333,6 +487,15 @@ function parseCookies(cookieHeader) {
 }
 
 function verifyAuthCookieValue(value) {
+  const payload = verifySignedPayloadValue(value);
+  if (!payload?.user) {
+    return null;
+  }
+
+  return payload.user;
+}
+
+function verifySignedPayloadValue(value) {
   if (!value || !value.includes(".")) {
     return null;
   }
@@ -349,13 +512,30 @@ function verifyAuthCookieValue(value) {
 
   try {
     const payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
-    if (!payload?.user || !payload?.exp || payload.exp < Date.now()) {
+    if (!payload?.exp || payload.exp < Date.now()) {
       return null;
     }
-    return payload.user;
+    return payload;
   } catch (_error) {
     return null;
   }
+}
+
+function createSignedExportToken(filters) {
+  return createSignedPayloadValue({
+    type: "admin-export-xlsx",
+    filters,
+    exp: Date.now() + SIGNED_EXPORT_DURATION_MS,
+  });
+}
+
+function sendWorkbookResponse(res, workbook, filters) {
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("X-Export-Filters", buildFilterQueryString(filters));
+  res.setHeader("Content-Disposition", `attachment; filename="planilha-cartao-ponto-lc-transportes-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+  return workbook.xlsx.write(res).then(() => {
+    res.end();
+  });
 }
 
 function setAuthCookie(res, user) {
@@ -375,6 +555,56 @@ function clearAuthCookie(res) {
     secure: shouldUseSecureCookies(),
     path: "/",
   });
+}
+
+async function updateAdminPasswordHash(userId, passwordHash) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("users")
+        .update({ password_hash: passwordHash })
+        .eq("id", userId)
+        .eq("role", "admin")
+        .select("*")
+        .maybeSingle()
+    );
+  }
+
+  const user = localUsers.find((item) => isSameEntityId(item.id, userId) && item.role === "admin");
+  if (!user) {
+    return null;
+  }
+
+  user.password_hash = passwordHash;
+  return user;
+}
+
+async function verifyLoginPassword(user, password) {
+  if (!user) {
+    return false;
+  }
+
+  const normalizedPassword = String(password || "");
+  if (user.password_hash && bcrypt.compareSync(normalizedPassword, user.password_hash)) {
+    return true;
+  }
+
+  if (user.role !== "admin") {
+    return false;
+  }
+
+  const adminConfig = getAdminConfig();
+  if (!adminConfig.password || normalizedPassword !== adminConfig.password) {
+    return false;
+  }
+
+  const passwordHash = bcrypt.hashSync(adminConfig.password, 10);
+  const updatedUser = await updateAdminPasswordHash(user.id, passwordHash);
+  if (updatedUser) {
+    user.password_hash = passwordHash;
+  }
+
+  return true;
 }
 
 function ensureInitialized() {
@@ -429,17 +659,15 @@ async function ensureAdminUser() {
     );
 
     if (adminUser) {
-      const shouldUpdatePassword = !bcrypt.compareSync(adminConfig.password, adminUser.password_hash);
       const shouldUpdateName = adminUser.name !== adminConfig.name || adminUser.employee_id !== adminConfig.name;
 
-      if (shouldUpdatePassword || shouldUpdateName) {
+      if (shouldUpdateName) {
         await runQuery(
           supabase
             .from("users")
             .update({
               name: adminConfig.name,
               employee_id: adminConfig.name,
-              password_hash: passwordHash,
             })
             .eq("id", adminUser.id)
         );
@@ -463,7 +691,6 @@ async function ensureAdminUser() {
           .update({
             name: adminConfig.name,
             employee_id: adminConfig.name,
-            password_hash: passwordHash,
           })
           .eq("id", legacyAdmin.id)
       );
@@ -485,7 +712,6 @@ async function ensureAdminUser() {
   if (adminUser) {
     adminUser.name = adminConfig.name;
     adminUser.employee_id = adminConfig.name;
-    adminUser.password_hash = passwordHash;
     return;
   }
 
@@ -493,7 +719,6 @@ async function ensureAdminUser() {
   if (legacyAdmin) {
     legacyAdmin.name = adminConfig.name;
     legacyAdmin.employee_id = adminConfig.name;
-    legacyAdmin.password_hash = passwordHash;
     return;
   }
 
@@ -538,13 +763,84 @@ async function initializeStorage() {
 }
 
 async function getUserByEmployeeId(employeeId) {
+  const normalizedEmployeeId = String(employeeId || "").trim();
+
   if (storageMode === "supabase") {
-    return runQuery(
-      supabase.from("users").select("*").eq("employee_id", String(employeeId).trim()).maybeSingle()
+    const exactUser = await runQuery(
+      supabase.from("users").select("*").eq("employee_id", normalizedEmployeeId).maybeSingle()
     );
+    if (exactUser) {
+      return exactUser;
+    }
+
+    const caseInsensitiveMatches = await runQuery(
+      supabase.from("users").select("*").ilike("employee_id", normalizedEmployeeId).limit(2)
+    );
+    if (caseInsensitiveMatches.length) {
+      return caseInsensitiveMatches[0];
+    }
+
+    if (isAdminLoginIdentifier(normalizedEmployeeId)) {
+      const adminConfig = getAdminConfig();
+      const preferredAdminIds = [adminConfig.name, LEGACY_ADMIN_NAME]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean);
+
+      for (const preferredAdminId of preferredAdminIds) {
+        const adminUser = await runQuery(
+          supabase
+            .from("users")
+            .select("*")
+            .eq("employee_id", preferredAdminId)
+            .eq("role", "admin")
+            .maybeSingle()
+        );
+        if (adminUser) {
+          return adminUser;
+        }
+      }
+
+      const adminUsers = await runQuery(
+        supabase
+          .from("users")
+          .select("*")
+          .eq("role", "admin")
+          .limit(5)
+      );
+      return adminUsers[0] || null;
+    }
+
+    return null;
   }
 
-  return localUsers.find((user) => user.employee_id === String(employeeId).trim()) || null;
+  const exactUser = localUsers.find((user) => user.employee_id === normalizedEmployeeId);
+  if (exactUser) {
+    return exactUser;
+  }
+
+  const normalizedLookup = normalizeLoginIdentifier(normalizedEmployeeId);
+  const caseInsensitiveUser = localUsers.find((user) => normalizeLoginIdentifier(user.employee_id) === normalizedLookup);
+  if (caseInsensitiveUser) {
+    return caseInsensitiveUser;
+  }
+
+  if (isAdminLoginIdentifier(normalizedEmployeeId)) {
+    const adminConfig = getAdminConfig();
+    const preferredAdminIds = [adminConfig.name, LEGACY_ADMIN_NAME]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+
+    for (const preferredAdminId of preferredAdminIds) {
+      const adminUser = localUsers.find((user) => user.role === "admin" && user.employee_id === preferredAdminId);
+      if (adminUser) {
+        return adminUser;
+      }
+    }
+
+    return localUsers.find((user) => user.role === "admin") || null;
+  }
+
+  return null;
 }
 
 async function getUserById(userId) {
@@ -708,6 +1004,185 @@ async function updateVehicleCurrentKm(vehicleId, currentKm) {
   return vehicle;
 }
 
+async function refreshVehicleCurrentKmByPlate(plate) {
+  const vehicle = await getVehicleByPlate(plate);
+  if (!vehicle) {
+    return null;
+  }
+
+  const normalizedPlate = String(vehicle.plate || "").trim().toUpperCase();
+  const records = await listAllRecordsAscending();
+  const transfers = await listAllVehicleTransfersAscending();
+  const observedKms = [
+    Number(vehicle.initial_km ?? 0),
+    ...records
+      .filter((record) => String(record.vehicle_plate || "").trim().toUpperCase() === normalizedPlate)
+      .map((record) => Number(record.vehicle_km))
+      .filter((km) => !Number.isNaN(km)),
+    ...transfers.flatMap((transfer) => {
+      const values = [];
+      if (String(transfer.from_vehicle_plate || "").trim().toUpperCase() === normalizedPlate) {
+        values.push(Number(transfer.from_vehicle_km));
+      }
+      if (String(transfer.to_vehicle_plate || "").trim().toUpperCase() === normalizedPlate) {
+        values.push(Number(transfer.to_vehicle_km));
+      }
+      return values.filter((km) => !Number.isNaN(km));
+    }),
+  ];
+
+  const nextCurrentKm = Math.max(...observedKms, Number(vehicle.initial_km ?? 0), 0);
+  return updateVehicleCurrentKm(vehicle.id, nextCurrentKm);
+}
+
+async function insertVehicleTransfer(payload) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("vehicle_transfers")
+        .insert(payload)
+        .select("*")
+        .single()
+    );
+  }
+
+  const transfer = {
+    id: localVehicleTransferSequence++,
+    ...payload,
+    created_at: new Date().toISOString(),
+  };
+  localVehicleTransfers.push(transfer);
+  return transfer;
+}
+
+async function listUserVehicleTransfersAscending(userId) {
+  if (storageMode === "supabase") {
+    return listSupabaseRows(() => (
+      supabase
+        .from("vehicle_transfers")
+        .select("*")
+        .eq("user_id", userId)
+        .order("recorded_at", { ascending: true })
+    ));
+  }
+
+  return localVehicleTransfers
+    .filter((transfer) => transfer.user_id === userId)
+    .sort(compareTimelineEntries);
+}
+
+async function listAllVehicleTransfersAscending(filters = null, options = {}) {
+  if (storageMode === "supabase") {
+    const rows = await listSupabaseRows(() => (
+      supabase
+        .from("vehicle_transfers")
+        .select("*")
+        .order("recorded_at", { ascending: true })
+    ));
+    return filters ? rows.filter((transfer) => matchesTransferFilters(transfer, filters, options)) : rows;
+  }
+
+  const rows = [...localVehicleTransfers].sort(compareTimelineEntries);
+  return filters ? rows.filter((transfer) => matchesTransferFilters(transfer, filters, options)) : rows;
+}
+
+async function buildVehicleContextForUser(userId) {
+  const userRecords = await listUserRecordsAscending(userId);
+  const openJourneyRecords = getOpenJourneyRecords(userRecords);
+
+  if (!openJourneyRecords.length) {
+    return {
+      activeJourney: false,
+      journeyStartedAt: null,
+      lastEventAt: null,
+      currentVehicle: null,
+    };
+  }
+
+  const journeyStartedAt = openJourneyRecords[0].recorded_at;
+  const userTransfers = await listUserVehicleTransfersAscending(userId);
+  const relevantTransfers = userTransfers.filter((transfer) =>
+    new Date(transfer.recorded_at).getTime() >= new Date(journeyStartedAt).getTime()
+  );
+
+  const events = [
+    ...openJourneyRecords.map((record) => ({
+      recorded_at: record.recorded_at,
+      local_date: record.local_date,
+      local_time: record.local_time,
+      created_at: record.created_at,
+      vehiclePlate: record.vehicle_plate,
+      vehicleKm: record.vehicle_km,
+      source: "time_record",
+    })),
+    ...relevantTransfers.map((transfer) => ({
+      recorded_at: transfer.recorded_at,
+      local_date: transfer.local_date,
+      local_time: transfer.local_time,
+      created_at: transfer.created_at,
+      vehiclePlate: transfer.to_vehicle_plate,
+      vehicleKm: transfer.to_vehicle_km,
+      source: "vehicle_transfer",
+    })),
+  ].sort(compareTimelineEntries);
+
+  const lastEvent = events[events.length - 1] || null;
+
+  return {
+    activeJourney: true,
+    journeyStartedAt,
+    lastEventAt: lastEvent?.recorded_at || openJourneyRecords[openJourneyRecords.length - 1].recorded_at,
+    currentVehicle: lastEvent?.vehiclePlate
+      ? {
+        plate: lastEvent.vehiclePlate,
+        km: typeof lastEvent.vehicleKm === "number" ? lastEvent.vehicleKm : Number(lastEvent.vehicleKm || 0),
+        source: lastEvent.source,
+      }
+      : null,
+  };
+}
+
+async function listActiveVehicleAssignments() {
+  const employees = await listEmployees();
+  const assignments = [];
+
+  for (const employee of employees) {
+    const context = await buildVehicleContextForUser(employee.id);
+    if (!context.activeJourney || !context.currentVehicle?.plate) {
+      continue;
+    }
+
+    assignments.push({
+      userId: employee.id,
+      employeeId: employee.employee_id,
+      employeeName: employee.name,
+      plate: String(context.currentVehicle.plate).trim().toUpperCase(),
+      km: Number(context.currentVehicle.km ?? 0),
+    });
+  }
+
+  return assignments;
+}
+
+function buildVehicleUsageMap(assignments = []) {
+  const usageMap = new Map();
+
+  assignments.forEach((assignment) => {
+    usageMap.set(String(assignment.plate || "").trim().toUpperCase(), assignment);
+  });
+
+  return usageMap;
+}
+
+function getVehicleUsageConflict(usageMap, vehiclePlate, userId) {
+  const usage = usageMap.get(String(vehiclePlate || "").trim().toUpperCase());
+  if (!usage) {
+    return null;
+  }
+
+  return String(usage.userId) === String(userId) ? null : usage;
+}
+
 async function updateEmployeeUser(userId, updates) {
   if (storageMode === "supabase") {
     return runQuery(
@@ -764,6 +1239,12 @@ async function syncRecordSnapshotForUser(userId, userSnapshot) {
         .update(updates)
         .eq("user_id", userId)
     );
+    await runQuery(
+      supabase
+        .from("vehicle_transfers")
+        .update(updates)
+        .eq("user_id", userId)
+    );
     return;
   }
 
@@ -771,6 +1252,11 @@ async function syncRecordSnapshotForUser(userId, userSnapshot) {
     record.user_id === userId
       ? { ...record, ...updates }
       : record
+  ));
+  localVehicleTransfers = localVehicleTransfers.map((transfer) => (
+    transfer.user_id === userId
+      ? { ...transfer, ...updates }
+      : transfer
   ));
 }
 
@@ -791,13 +1277,15 @@ async function deleteEmployeeUser(userId) {
 async function listRecordsForUser(user, filters = null) {
   if (storageMode === "supabase") {
     if (user.role === "admin") {
-      const rows = await runQuery(supabase.from("time_records").select("*").order("recorded_at", { ascending: false }));
+      const rows = await listSupabaseRows(() => (
+        supabase.from("time_records").select("*").order("recorded_at", { ascending: false })
+      ));
       return filters ? applyRecordFilters(rows, filters) : rows;
     }
 
-    return runQuery(
+    return listSupabaseRows(() => (
       supabase.from("time_records").select("*").eq("user_id", user.id).order("recorded_at", { ascending: false })
-    );
+    ));
   }
 
   if (user.role === "admin") {
@@ -808,6 +1296,24 @@ async function listRecordsForUser(user, filters = null) {
   return localRecords
     .filter((record) => record.user_id === user.id)
     .sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at));
+}
+
+async function findRecordByClientRequestId(clientRequestId) {
+  if (!clientRequestId) {
+    return null;
+  }
+
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("time_records")
+        .select("*")
+        .eq("client_request_id", clientRequestId)
+        .maybeSingle()
+    );
+  }
+
+  return localRecords.find((record) => record.client_request_id === clientRequestId) || null;
 }
 
 async function insertRecord(user, payload) {
@@ -830,9 +1336,60 @@ async function insertRecord(user, payload) {
   return record;
 }
 
+async function getRecordById(recordId) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("time_records")
+        .select("*")
+        .eq("id", recordId)
+        .maybeSingle()
+    );
+  }
+
+  return localRecords.find((record) => isSameEntityId(record.id, recordId)) || null;
+}
+
+async function updateRecordById(recordId, updates) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("time_records")
+        .update(updates)
+        .eq("id", recordId)
+        .select("*")
+        .maybeSingle()
+    );
+  }
+
+  const record = localRecords.find((item) => isSameEntityId(item.id, recordId));
+  if (!record) {
+    return null;
+  }
+
+  Object.assign(record, updates);
+  return record;
+}
+
+async function deleteRecordById(recordId) {
+  if (storageMode === "supabase") {
+    const { error } = await supabase.from("time_records").delete().eq("id", recordId);
+    if (error) {
+      throw error;
+    }
+    return true;
+  }
+
+  const before = localRecords.length;
+  localRecords = localRecords.filter((record) => !isSameEntityId(record.id, recordId));
+  return localRecords.length !== before;
+}
+
 async function listAllRecordsAscending(filters = null) {
   if (storageMode === "supabase") {
-    const rows = await runQuery(supabase.from("time_records").select("*").order("recorded_at", { ascending: true }));
+    const rows = await listSupabaseRows(() => (
+      supabase.from("time_records").select("*").order("recorded_at", { ascending: true })
+    ));
     return filters ? applyRecordFilters(rows, filters) : rows;
   }
 
@@ -842,18 +1399,87 @@ async function listAllRecordsAscending(filters = null) {
 
 async function listUserRecordsAscending(userId) {
   if (storageMode === "supabase") {
-    return runQuery(
+    return listSupabaseRows(() => (
       supabase
         .from("time_records")
         .select("*")
         .eq("user_id", userId)
         .order("recorded_at", { ascending: true })
-    );
+    ));
   }
 
   return localRecords
     .filter((record) => record.user_id === userId)
     .sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+}
+
+function compareCombinedUserTimeline(left, right) {
+  const compare = compareTimelineEntries(left, right);
+  if (compare !== 0) {
+    return compare;
+  }
+
+  if (left.type === right.type) {
+    return 0;
+  }
+
+  return left.type === "point" ? -1 : 1;
+}
+
+function validateExistingRecordTimeline(records = []) {
+  const acceptedRecords = [];
+  const sortedRecords = [...records].sort(compareTimelineEntries);
+
+  for (const record of sortedRecords) {
+    const sequenceError = validateRecordSequence(acceptedRecords, record.action, record.recorded_at);
+    if (sequenceError) {
+      return sequenceError;
+    }
+
+    acceptedRecords.push(record);
+  }
+
+  return null;
+}
+
+function validateTimelineWithTransfers(records = [], transfers = []) {
+  const events = [
+    ...records.map((record) => ({ ...record, type: "point" })),
+    ...transfers.map((transfer) => ({ ...transfer, type: "transfer" })),
+  ].sort(compareCombinedUserTimeline);
+
+  let journeyActive = false;
+
+  for (const event of events) {
+    if (event.type === "transfer") {
+      if (!journeyActive) {
+        return "O horario informado deixaria uma troca de veiculo fora da jornada do funcionario.";
+      }
+      continue;
+    }
+
+    if (event.action === "Entrada") {
+      journeyActive = true;
+      continue;
+    }
+
+    if (event.action === "Saida") {
+      journeyActive = false;
+    }
+  }
+
+  return null;
+}
+
+function buildAdminRecordWarning(records = [], transfers = []) {
+  const sequenceError = validateExistingRecordTimeline(records);
+  const transferError = validateTimelineWithTransfers(records, transfers);
+  const warnings = [sequenceError, transferError].filter(Boolean);
+  if (!warnings.length) {
+    return null;
+  }
+
+  return `Atencao: a sequencia da jornada ficou inconsistente. ${warnings.join(" ")}`;
 }
 
 function getOpenJourneyRecords(records) {
@@ -863,7 +1489,7 @@ function getOpenJourneyRecords(records) {
 
 function getAllowedNextActions(records) {
   if (!records.length) {
-    return ["Entrada"];
+    return [TIME_RECORD_ACTIONS[0]];
   }
 
   const lastAction = records[records.length - 1].action;
@@ -881,6 +1507,10 @@ function getAllowedNextActions(records) {
   }
 
   return [];
+}
+
+function canReuseCurrentVehicleForAction(action) {
+  return action === "Saida para almoco" || action === "Retorno do almoco";
 }
 
 function validateRecordSequence(records, nextAction, timestamp) {
@@ -914,9 +1544,15 @@ function resetInMemoryState() {
   localUsers = [];
   localRecords = [];
   localVehicles = [];
+  localVehicleTransfers = [];
   localUserSequence = 1;
   localRecordSequence = 1;
   localVehicleSequence = 1;
+  localVehicleTransferSequence = 1;
+  initializationPromise = null;
+}
+
+function resetInitializationState() {
   initializationPromise = null;
 }
 
@@ -961,7 +1597,31 @@ app.post("/api/admin/employees", requireAdmin, asyncRoute(createEmployeeFromRequ
 
 app.get("/api/vehicles", requireAuth, asyncRoute(async (_req, res) => {
   const vehicles = await listVehicles();
-  return res.json({ vehicles: vehicles.map(serializeVehicle) });
+  if (_req.authUser.role !== "employee") {
+    return res.json({ vehicles: vehicles.map(serializeVehicle) });
+  }
+
+  const activeAssignments = await listActiveVehicleAssignments();
+  const usageMap = buildVehicleUsageMap(activeAssignments);
+  const serializedVehicles = vehicles.map((vehicle) => {
+    const usage = usageMap.get(String(vehicle.plate || "").trim().toUpperCase());
+    if (usage && String(usage.userId) === String(_req.authUser.id)) {
+      return {
+        ...serializeVehicle(vehicle),
+        inUse: true,
+        inUseByOtherEmployee: false,
+        inUseBy: {
+          userId: usage.userId,
+          employeeId: usage.employeeId,
+          employeeName: usage.employeeName,
+        },
+      };
+    }
+
+    return serializeVehicleWithUsage(vehicle, usage || null);
+  });
+
+  return res.json({ vehicles: serializedVehicles });
 }));
 
 app.post("/api/admin/vehicles", requireAdmin, asyncRoute(async (req, res) => {
@@ -1062,6 +1722,90 @@ app.delete("/api/admin/employees/:employeeId", requireAdmin, asyncRoute(async (r
   return res.json({ ok: true });
 }));
 
+app.patch("/api/admin/records/:recordId", requireAdmin, asyncRoute(async (req, res) => {
+  const record = await getRecordById(req.params.recordId);
+  if (!record) {
+    return res.status(404).json({ error: "Registro nao encontrado." });
+  }
+
+  const { action, recordedAt, localDate, localTime, vehicleKm } = req.body || {};
+  const normalizedAction = String(action || record.action || "").trim();
+  const normalizedRecordedAt = String(recordedAt || "").trim();
+  const normalizedLocalDate = String(localDate || "").trim();
+  const normalizedLocalTime = String(localTime || "").trim();
+  const hasVehicleKm = vehicleKm !== undefined && vehicleKm !== null && String(vehicleKm).trim() !== "";
+  const normalizedVehicleKm = hasVehicleKm ? Number(vehicleKm) : Number(record.vehicle_km ?? 0);
+
+  if (!TIME_RECORD_ACTIONS.includes(normalizedAction)) {
+    return res.status(400).json({ error: "Informe um tipo valido para o registro." });
+  }
+
+  if (!normalizedRecordedAt || Number.isNaN(new Date(normalizedRecordedAt).getTime())) {
+    return res.status(400).json({ error: "Informe uma data e hora validas para o registro." });
+  }
+
+  if (!normalizedLocalDate || !normalizedLocalTime) {
+    return res.status(400).json({ error: "Informe a data e a hora locais do registro." });
+  }
+
+  if (hasVehicleKm && (Number.isNaN(normalizedVehicleKm) || normalizedVehicleKm < 0)) {
+    return res.status(400).json({ error: "Informe um KM valido para o registro." });
+  }
+
+  const editedRecord = {
+    ...record,
+    action: normalizedAction,
+    recorded_at: normalizedRecordedAt,
+    local_date: normalizedLocalDate,
+    local_time: normalizedLocalTime,
+    vehicle_km: normalizedVehicleKm,
+  };
+
+  const userRecords = await listUserRecordsAscending(record.user_id);
+  const nextRecords = userRecords.map((item) => (
+    isSameEntityId(item.id, record.id)
+      ? editedRecord
+      : item
+  ));
+
+  const userTransfers = await listUserVehicleTransfersAscending(record.user_id);
+  const warning = buildAdminRecordWarning(nextRecords, userTransfers);
+
+  const updatedRecord = await updateRecordById(record.id, {
+    action: normalizedAction,
+    recorded_at: normalizedRecordedAt,
+    local_date: normalizedLocalDate,
+    local_time: normalizedLocalTime,
+    vehicle_km: normalizedVehicleKm,
+  });
+
+  if (record.vehicle_plate) {
+    await refreshVehicleCurrentKmByPlate(record.vehicle_plate);
+  }
+
+  return res.json({ record: updatedRecord, warning });
+}));
+
+app.delete("/api/admin/records/:recordId", requireAdmin, asyncRoute(async (req, res) => {
+  const record = await getRecordById(req.params.recordId);
+  if (!record) {
+    return res.status(404).json({ error: "Registro nao encontrado." });
+  }
+
+  const userRecords = await listUserRecordsAscending(record.user_id);
+  const nextRecords = userRecords.filter((item) => !isSameEntityId(item.id, record.id));
+  const userTransfers = await listUserVehicleTransfersAscending(record.user_id);
+  const warning = buildAdminRecordWarning(nextRecords, userTransfers);
+
+  await deleteRecordById(record.id);
+
+  if (record.vehicle_plate) {
+    await refreshVehicleCurrentKmByPlate(record.vehicle_plate);
+  }
+
+  return res.json({ ok: true, warning });
+}));
+
 app.post("/api/auth/login", asyncRoute(async (req, res) => {
   const { employeeId, password } = req.body;
 
@@ -1070,7 +1814,8 @@ app.post("/api/auth/login", asyncRoute(async (req, res) => {
   }
 
   const user = await getUserByEmployeeId(employeeId);
-  if (!user || !bcrypt.compareSync(String(password), user.password_hash)) {
+  const isPasswordValid = await verifyLoginPassword(user, password);
+  if (!isPasswordValid) {
     return res.status(401).json({ error: "Credenciais invalidas." });
   }
 
@@ -1090,49 +1835,98 @@ app.get("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
   return res.json({ records: rows });
 }));
 
+app.get("/api/me/vehicle-context", requireAuth, asyncRoute(async (req, res) => {
+  if (req.authUser.role !== "employee") {
+    return res.json({ context: serializeVehicleContext(null) });
+  }
+
+  const context = await buildVehicleContextForUser(req.authUser.id);
+  return res.json({ context: serializeVehicleContext(context) });
+}));
+
 app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
   const user = req.authUser;
   if (user.role !== "employee") {
     return res.status(403).json({ error: "Somente funcionarios registram ponto." });
   }
 
-  const { action, latitude, longitude, locationLabel, recordedAt, localDate, localTime, vehiclePlate, vehicleKm } = req.body;
-  const allowedActions = ["Entrada", "Saida para almoco", "Retorno do almoco", "Saida"];
+  const { action, latitude, longitude, locationLabel, recordedAt, localDate, localTime, vehiclePlate, vehicleKm, clientRequestId } = req.body;
+  const allowedActions = TIME_RECORD_ACTIONS;
 
   if (!allowedActions.includes(action)) {
     return res.status(400).json({ error: "Acao de ponto invalida." });
-  }
-
-  if (!vehiclePlate || vehicleKm === undefined || vehicleKm === null || Number.isNaN(Number(vehicleKm))) {
-    return res.status(400).json({ error: "Informe a placa e o KM do veiculo." });
   }
 
   if (typeof latitude !== "number" || typeof longitude !== "number") {
     return res.status(400).json({ error: "Ative a localizacao para registrar o ponto." });
   }
 
-  const normalizedVehiclePlate = String(vehiclePlate).trim().toUpperCase();
-  const numericVehicleKm = Number(vehicleKm);
+  const normalizedClientRequestId = String(clientRequestId || "").trim() || null;
+  if (normalizedClientRequestId) {
+    const existingRecord = await findRecordByClientRequestId(normalizedClientRequestId);
+    if (existingRecord) {
+      return res.status(200).json({ record: existingRecord });
+    }
+  }
+
+  const timestamp = recordedAt || new Date().toISOString();
+  const date = localDate || localDateFormatter.format(new Date(timestamp));
+  const time = localTime || localTimeFormatter.format(new Date(timestamp));
+  const userRecords = await listUserRecordsAscending(user.id);
+  const sequenceError = validateRecordSequence(userRecords, action, timestamp);
+
+  if (sequenceError) {
+    return res.status(409).json({ error: sequenceError });
+  }
+
+  const vehicleContext = await buildVehicleContextForUser(user.id);
+  let normalizedVehiclePlate = String(vehiclePlate || "").trim().toUpperCase();
+  let numericVehicleKm =
+    vehicleKm === undefined || vehicleKm === null || String(vehicleKm).trim() === ""
+      ? null
+      : Number(vehicleKm);
+
+  if (
+    (!normalizedVehiclePlate || numericVehicleKm === null || Number.isNaN(numericVehicleKm)) &&
+    canReuseCurrentVehicleForAction(action) &&
+    vehicleContext.activeJourney &&
+    vehicleContext.currentVehicle?.plate
+  ) {
+    normalizedVehiclePlate = String(vehicleContext.currentVehicle.plate).trim().toUpperCase();
+    numericVehicleKm = Number(vehicleContext.currentVehicle.km ?? 0);
+  }
+
+  if (!normalizedVehiclePlate || numericVehicleKm === null || Number.isNaN(numericVehicleKm)) {
+    return res.status(400).json({ error: "Informe a placa e o KM do veiculo." });
+  }
+
   const registeredVehicle = await getVehicleByPlate(normalizedVehiclePlate);
+  const activeAssignments = await listActiveVehicleAssignments();
+  const usageMap = buildVehicleUsageMap(activeAssignments);
 
   if (!registeredVehicle) {
     return res.status(409).json({ error: "Selecione um veiculo cadastrado." });
+  }
+
+  if (vehicleContext.activeJourney && vehicleContext.currentVehicle?.plate) {
+    if (normalizedVehiclePlate !== vehicleContext.currentVehicle.plate) {
+      return res.status(409).json({
+        error: `Este funcionario esta com o veiculo ${vehicleContext.currentVehicle.plate} em uso. Use o botao Trocar veiculo para mudar.`,
+      });
+    }
+  } else {
+    const vehicleConflict = getVehicleUsageConflict(usageMap, normalizedVehiclePlate, user.id);
+    if (vehicleConflict) {
+      return res.status(409).json({
+        error: `O veiculo ${normalizedVehiclePlate} ja esta em uso por ${vehicleConflict.employeeName} (${vehicleConflict.employeeId}).`,
+      });
+    }
   }
 
   if (registeredVehicle && numericVehicleKm < Number(registeredVehicle.current_km ?? 0)) {
     return res.status(409).json({
       error: `O KM informado nao pode ser menor que o KM atual do veiculo (${registeredVehicle.current_km}).`,
     });
-  }
-
-  const timestamp = recordedAt || new Date().toISOString();
-  const date = localDate || new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(new Date(timestamp));
-  const time = localTime || new Intl.DateTimeFormat("pt-BR", { timeStyle: "medium" }).format(new Date(timestamp));
-  const userRecords = await listUserRecordsAscending(user.id);
-  const sequenceError = validateRecordSequence(userRecords, action, timestamp);
-
-  if (sequenceError) {
-    return res.status(409).json({ error: sequenceError });
   }
 
   const record = await insertRecord(user, {
@@ -1148,6 +1942,7 @@ app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
     location_label: locationLabel || "Localizacao nao informada",
     vehicle_plate: normalizedVehiclePlate,
     vehicle_km: numericVehicleKm,
+    client_request_id: normalizedClientRequestId,
   });
 
   if (registeredVehicle) {
@@ -1157,10 +1952,150 @@ app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
   return res.status(201).json({ record });
 }));
 
+app.post("/api/me/vehicle-transfers", requireAuth, asyncRoute(async (req, res) => {
+  const user = req.authUser;
+  if (user.role !== "employee") {
+    return res.status(403).json({ error: "Somente funcionarios podem trocar de veiculo." });
+  }
+
+  const {
+    fromVehiclePlate,
+    fromVehicleKm,
+    toVehiclePlate,
+    toVehicleKm,
+    latitude,
+    longitude,
+    locationLabel,
+    recordedAt,
+    localDate,
+    localTime,
+  } = req.body;
+
+  if (typeof latitude !== "number" || typeof longitude !== "number") {
+    return res.status(400).json({ error: "Ative a localizacao para trocar o veiculo." });
+  }
+
+  if (
+    fromVehicleKm === undefined ||
+    fromVehicleKm === null ||
+    Number.isNaN(Number(fromVehicleKm)) ||
+    toVehicleKm === undefined ||
+    toVehicleKm === null ||
+    Number.isNaN(Number(toVehicleKm))
+  ) {
+    return res.status(400).json({ error: "Informe o KM final do veiculo atual e o KM do novo veiculo." });
+  }
+
+  if (!toVehiclePlate) {
+    return res.status(400).json({ error: "Selecione o novo veiculo da troca." });
+  }
+
+  const context = await buildVehicleContextForUser(user.id);
+  if (!context.activeJourney || !context.currentVehicle?.plate) {
+    return res.status(409).json({ error: "Inicie a jornada antes de trocar de veiculo." });
+  }
+
+  const normalizedFromVehiclePlate = String(fromVehiclePlate || context.currentVehicle.plate).trim().toUpperCase();
+  const normalizedToVehiclePlate = String(toVehiclePlate).trim().toUpperCase();
+  const numericFromVehicleKm = Number(fromVehicleKm);
+  const numericToVehicleKm = Number(toVehicleKm);
+
+  if (normalizedFromVehiclePlate !== context.currentVehicle.plate) {
+    return res.status(409).json({ error: "O veiculo atual mudou. Atualize a tela e tente novamente." });
+  }
+
+  if (normalizedToVehiclePlate === normalizedFromVehiclePlate) {
+    return res.status(409).json({ error: "Selecione um veiculo diferente para concluir a troca." });
+  }
+
+  const currentVehicle = await getVehicleByPlate(normalizedFromVehiclePlate);
+  const nextVehicle = await getVehicleByPlate(normalizedToVehiclePlate);
+  const activeAssignments = await listActiveVehicleAssignments();
+  const usageMap = buildVehicleUsageMap(activeAssignments);
+
+  if (!currentVehicle) {
+    return res.status(409).json({ error: "O veiculo atual nao esta mais cadastrado." });
+  }
+
+  if (!nextVehicle) {
+    return res.status(409).json({ error: "Selecione um novo veiculo cadastrado." });
+  }
+
+  const nextVehicleConflict = getVehicleUsageConflict(usageMap, normalizedToVehiclePlate, user.id);
+  if (nextVehicleConflict) {
+    return res.status(409).json({
+      error: `O veiculo ${normalizedToVehiclePlate} ja esta em uso por ${nextVehicleConflict.employeeName} (${nextVehicleConflict.employeeId}).`,
+    });
+  }
+
+  const minimumCurrentKm = Math.max(
+    Number(currentVehicle.current_km ?? 0),
+    Number(context.currentVehicle.km ?? 0)
+  );
+  if (numericFromVehicleKm < minimumCurrentKm) {
+    return res.status(409).json({
+      error: `O KM final do veiculo atual nao pode ser menor que ${minimumCurrentKm}.`,
+    });
+  }
+
+  if (numericToVehicleKm < Number(nextVehicle.current_km ?? 0)) {
+    return res.status(409).json({
+      error: `O KM do novo veiculo nao pode ser menor que o KM atual dele (${nextVehicle.current_km}).`,
+    });
+  }
+
+  const timestamp = recordedAt || new Date().toISOString();
+  if (context.lastEventAt && new Date(timestamp).getTime() < new Date(context.lastEventAt).getTime()) {
+    return res.status(409).json({ error: "O horario da troca nao pode ser anterior ao ultimo evento da jornada." });
+  }
+
+  const date = localDate || localDateFormatter.format(new Date(timestamp));
+  const time = localTime || localTimeFormatter.format(new Date(timestamp));
+
+  const transfer = await insertVehicleTransfer({
+    user_id: user.id,
+    employee_name: user.name,
+    employee_id: user.employeeId,
+    from_vehicle_plate: normalizedFromVehiclePlate,
+    from_vehicle_km: numericFromVehicleKm,
+    to_vehicle_plate: normalizedToVehiclePlate,
+    to_vehicle_km: numericToVehicleKm,
+    recorded_at: timestamp,
+    local_date: date,
+    local_time: time,
+    latitude,
+    longitude,
+    location_label: locationLabel || "Localizacao nao informada",
+  });
+
+  await updateVehicleCurrentKm(currentVehicle.id, numericFromVehicleKm);
+  await updateVehicleCurrentKm(nextVehicle.id, numericToVehicleKm);
+
+  const nextContext = await buildVehicleContextForUser(user.id);
+  return res.status(201).json({
+    transfer,
+    context: serializeVehicleContext(nextContext),
+  });
+}));
+
 app.get("/api/admin/summary", requireAdmin, asyncRoute(async (_req, res) => {
   const filters = normalizeAdminFilters(_req.query);
-  const rows = await listAllRecordsAscending(filters);
-  const summary = computeSummary(rows).map((item) => ({
+  const baseFilters = filters.vehiclePlate ? getFiltersWithoutVehicle(filters) : filters;
+  const rows = await listAllRecordsAscending(baseFilters);
+  const transfers = await listAllVehicleTransfersAscending(baseFilters, { includeVehicle: false });
+  const shouldUseRecentWindow = !filters.dateFrom && !filters.dateTo;
+  // Calculamos com o historico completo (sem cortar por horario) para nao
+  // perder a Entrada de turnos que comecam antes da janela das 48h, como
+  // turnos que atravessam a madrugada. O filtro de recencia e aplicado
+  // depois, em cima do resumo ja fechado de cada turno.
+  const computedSummary = computeSummary(rows, transfers);
+  const recentSummary = shouldUseRecentWindow
+    ? filterSummaryWithinLastHours(computedSummary, 48)
+    : computedSummary;
+  const filteredSummary = filters.vehiclePlate
+    ? recentSummary.filter((item) => item.vehiclePlates.includes(filters.vehiclePlate))
+    : recentSummary;
+  const summary = filteredSummary.map((item) => ({
     employeeName: item.employeeName,
     employeeId: item.employeeId,
     localDate: item.day,
@@ -1174,14 +2109,45 @@ app.get("/api/admin/summary", requireAdmin, asyncRoute(async (_req, res) => {
     lunchEnds: item.lunchEnds,
     exits: item.exits,
   }));
+  const { employees: aggregates, company: companyTotals } = aggregateSummaryByEmployee(filteredSummary);
   return res.json({
     summary,
+    aggregates,
+    companyTotals,
     filters: {
       employeeId: filters.employeeId,
       vehiclePlate: filters.vehiclePlate,
       dateFrom: filters.dateFrom,
       dateTo: filters.dateTo,
     },
+    windowHours: shouldUseRecentWindow ? 48 : null,
+  });
+}));
+
+app.get("/api/admin/alerts", requireAdmin, asyncRoute(async (req, res) => {
+  const filters = normalizeAdminFilters(req.query);
+  // As pendencias sempre olham a janela recente inteira. Recortar por periodo ou
+  // por veiculo esconderia a Entrada ou a Saida de uma jornada e geraria alerta
+  // falso de jornada aberta, entao aqui so o filtro de matricula e aplicado.
+  const alertFilters = { ...filters, vehiclePlate: "", dateFrom: "", dateTo: "", fromDate: null, toDate: null };
+  const records = await listAllRecordsAscending(alertFilters);
+  const transfers = await listAllVehicleTransfersAscending(alertFilters, { includeVehicle: false });
+  const allEmployees = (await listEmployees()).map(serializeManagedEmployee);
+  const employees = filters.employeeId
+    ? allEmployees.filter((employee) => employee.employeeId === filters.employeeId)
+    : allEmployees;
+  const alerts = detectPendingAlerts({
+    records,
+    transfers,
+    employees,
+    now: Date.now(),
+  });
+
+  return res.json({
+    alerts,
+    counts: summarizeAlerts(alerts),
+    thresholds: DEFAULT_ALERT_THRESHOLDS,
+    filters: { employeeId: filters.employeeId },
   });
 }));
 
@@ -1231,14 +2197,32 @@ app.get("/api/admin/export.csv", requireAdmin, asyncRoute(async (req, res) => {
 
 app.get("/api/admin/export.xlsx", requireAdmin, asyncRoute(async (req, res) => {
   const filters = normalizeAdminFilters(req.query);
-  const rows = await listAllRecordsAscending(filters);
+  const baseFilters = filters.vehiclePlate ? getFiltersWithoutVehicle(filters) : filters;
+  const rows = await listAllRecordsAscending(baseFilters);
+  const transfers = await listAllVehicleTransfersAscending(baseFilters, { includeVehicle: false });
 
-  const workbook = createWorkbook(rows);
-  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  res.setHeader("X-Export-Filters", buildFilterQueryString(filters));
-  res.setHeader("Content-Disposition", `attachment; filename="planilha-cartao-ponto-lc-transportes-${new Date().toISOString().slice(0, 10)}.xlsx"`);
-  await workbook.xlsx.write(res);
-  res.end();
+  const workbook = createWorkbook(rows, transfers);
+  await sendWorkbookResponse(res, workbook, filters);
+}));
+
+app.post("/api/admin/export.xlsx/link", requireAdmin, asyncRoute(async (req, res) => {
+  const filters = normalizeAdminFilters(req.body || {});
+  const token = createSignedExportToken(filters);
+  return res.json({ url: `/api/admin/export.xlsx/direct?token=${encodeURIComponent(token)}` });
+}));
+
+app.get("/api/admin/export.xlsx/direct", asyncRoute(async (req, res) => {
+  const tokenPayload = verifySignedPayloadValue(String(req.query.token || ""));
+  if (!tokenPayload || tokenPayload.type !== "admin-export-xlsx") {
+    return res.status(401).json({ error: "Link de exportacao invalido ou expirado." });
+  }
+
+  const filters = normalizeAdminFilters(tokenPayload.filters || {});
+  const baseFilters = filters.vehiclePlate ? getFiltersWithoutVehicle(filters) : filters;
+  const rows = await listAllRecordsAscending(baseFilters);
+  const transfers = await listAllVehicleTransfersAscending(baseFilters, { includeVehicle: false });
+  const workbook = createWorkbook(rows, transfers);
+  await sendWorkbookResponse(res, workbook, filters);
 }));
 
 app.use((error, _req, res, _next) => {
@@ -1254,17 +2238,26 @@ app.use((_req, res) => {
 async function start() {
   ensureRuntimeConfig();
   await ensureInitialized();
-  app.listen(PORT, () => {
+  if (serverInstance) {
+    return serverInstance;
+  }
+
+  serverInstance = app.listen(PORT, () => {
     console.log(`Servidor iniciado em http://localhost:${PORT} usando modo ${storageMode}`);
   });
+
+  return serverInstance;
 }
 
 app.__testing = {
   resetInMemoryState,
+  resetInitializationState,
   validateRecordSequence,
   getAllowedNextActions,
+  canReuseCurrentVehicleForAction,
   normalizeAdminFilters,
   applyRecordFilters,
+  detectPendingAlerts,
 };
 
 module.exports = app;

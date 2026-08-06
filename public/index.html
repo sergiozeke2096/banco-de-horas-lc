@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LC Transporte | Cartao de Ponto</title>
-  <link rel="stylesheet" href="/styles.css?v=20260312-2">
+  <link rel="stylesheet" href="/styles.css?v=20260321-03">
 </head>
 <body>
   <main class="shell">
@@ -59,17 +59,53 @@
       </div>
 
       <section class="card hidden" id="employeePanel">
+        <div class="journey-card" id="journeyCard">
+          <div class="journey-head">
+            <span class="journey-state" id="journeyState">Jornada nao iniciada</span>
+            <span class="journey-since" id="journeySince"></span>
+          </div>
+          <div class="journey-totals">
+            <div class="journey-total">
+              <span class="journey-total-label">Trabalhado hoje</span>
+              <span class="journey-total-value" id="journeyWorked">00:00</span>
+            </div>
+            <div class="journey-total">
+              <span class="journey-total-label">Parada</span>
+              <span class="journey-total-value" id="journeyBreak">00:00</span>
+            </div>
+          </div>
+        </div>
         <div class="section-head">
           <div>
             <h3>Registrar ponto</h3>
           </div>
           <span class="status" id="locationStatus">Aguardando acao.</span>
         </div>
+        <p class="offline-cache-banner hidden" id="offlineCacheBanner"></p>
+        <p class="next-action-hint" id="nextActionHint"></p>
         <div class="button-grid">
-          <button class="primary action-button" data-action="Entrada">Inicio</button>
-          <button class="lunch action-button" data-action="Saida para almoco">Parada</button>
-          <button class="lunch action-button" data-action="Retorno do almoco">Retorno</button>
-          <button class="danger action-button" data-action="Saida">Termino</button>
+          <button class="primary action-button" data-action="Entrada">
+            <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
+            <span>Inicio</span>
+          </button>
+          <button class="lunch action-button" data-action="Saida para almoco">
+            <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+            <span>Parada</span>
+          </button>
+          <button class="resume action-button" data-action="Retorno do almoco">
+            <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"></path><polyline points="3 4 3 9 8 9"></polyline></svg>
+            <span>Retorno</span>
+          </button>
+          <button class="danger action-button" data-action="Saida">
+            <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+            <span>Termino</span>
+          </button>
+        </div>
+        <p class="pending-punch-indicator hidden" id="pendingPunchIndicator"></p>
+        <div class="pending-punch-errors hidden" id="pendingPunchErrors"></div>
+        <div class="employee-tools">
+          <p class="muted employee-vehicle-status hidden" id="currentVehicleStatus"></p>
+          <button type="button" class="ghost employee-tool-button hidden" id="changeVehicleButton">Trocar veiculo</button>
         </div>
       </section>
 
@@ -121,6 +157,17 @@
               <button type="submit" class="secondary">Cadastrar veiculo</button>
             </form>
             <p class="feedback manager-feedback" id="vehicleManagerMessage"></p>
+            <div class="admin-search-panel">
+              <label class="filter-label" for="vehicleSearchInput">
+                Buscar veiculo cadastrado
+                <input id="vehicleSearchInput" type="text" list="vehicleSearchSuggestions" placeholder="Ex.: ABC1D23 ou Fiorino">
+              </label>
+              <datalist id="vehicleSearchSuggestions"></datalist>
+              <div class="filter-actions">
+                <button type="button" class="secondary" id="searchVehicleButton">Pesquisar veiculo</button>
+                <button type="button" class="ghost" id="clearVehicleSearchButton">Limpar busca</button>
+              </div>
+            </div>
             <div class="table-wrap employee-table-wrap">
               <table class="employees-table">
                 <thead>
@@ -147,6 +194,16 @@
               </div>
             </div>
             <p class="feedback manager-feedback" id="employeeManagerMessage"></p>
+            <div class="admin-search-panel">
+              <label class="filter-label" for="employeeManageSearchInput">
+                Buscar funcionario para gerenciar
+                <input id="employeeManageSearchInput" type="text" placeholder="Ex.: Joao Silva ou 1024">
+              </label>
+              <div class="filter-actions">
+                <button type="button" class="secondary" id="searchEmployeeButton">Pesquisar funcionario</button>
+                <button type="button" class="ghost" id="clearEmployeeSearchButton">Limpar busca</button>
+              </div>
+            </div>
             <div class="table-wrap employee-table-wrap">
               <table class="employees-table">
                 <thead>
@@ -198,12 +255,39 @@
             </section>
           </article>
         </div>
-        <div class="section-head">
-          <div>
-            <h3>Resumo administrativo</h3>
+        <div class="stat-tile-row hidden" id="companyStatTiles">
+          <div class="stat-tile">
+            <p class="stat-tile-label">Funcionarios</p>
+            <p class="stat-tile-value" id="statTileEmployeeCount">0</p>
+          </div>
+          <div class="stat-tile stat-tile-worked">
+            <p class="stat-tile-label">Total de horas</p>
+            <p class="stat-tile-value" id="statTileWorked">00:00</p>
+          </div>
+          <div class="stat-tile stat-tile-overtime">
+            <p class="stat-tile-label">Horas extras</p>
+            <p class="stat-tile-value" id="statTileOvertime">00:00</p>
+          </div>
+          <div class="stat-tile stat-tile-km">
+            <p class="stat-tile-label">Total de KM</p>
+            <p class="stat-tile-value" id="statTileKm">0</p>
           </div>
         </div>
-        <div class="table-wrap">
+        <div class="section-head hidden" id="alertsPanel">
+          <div>
+            <h3 id="alertsTitle">Pendencias</h3>
+            <p class="muted" id="alertsSubtitle"></p>
+          </div>
+          <button type="button" class="ghost" id="toggleAlertsButton">Ocultar pendencias</button>
+        </div>
+        <div class="alerts-list hidden" id="alertsContent"></div>
+        <div class="section-head hidden" id="summaryPanel">
+          <div>
+            <h3 id="summaryTitle">Resumo administrativo (ultimas 48h)</h3>
+          </div>
+          <button type="button" class="ghost" id="toggleSummaryButton">Ocultar resumo</button>
+        </div>
+        <div class="table-wrap hidden" id="summaryContent">
           <table class="summary-table">
             <thead>
               <tr>
@@ -219,6 +303,30 @@
             <tbody id="summaryBody">
               <tr>
                 <td colspan="7" class="empty-row">Nenhum dado carregado.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="section-head hidden" id="employeeAggregatesPanel">
+          <div>
+            <h3>Totais por funcionario</h3>
+          </div>
+          <button type="button" class="ghost" id="toggleAggregatesButton">Ocultar totais</button>
+        </div>
+        <div class="table-wrap hidden" id="employeeAggregatesContent">
+          <table class="summary-table">
+            <thead>
+              <tr>
+                <th>Funcionario</th>
+                <th>Dias</th>
+                <th>Total de horas</th>
+                <th>Horas extras</th>
+                <th>Total de KM</th>
+              </tr>
+            </thead>
+            <tbody id="employeeAggregatesBody">
+              <tr>
+                <td colspan="5" class="empty-row">Nenhum dado carregado.</td>
               </tr>
             </tbody>
           </table>
@@ -239,9 +347,7 @@
           <div class="admin-filter-grid">
             <label class="filter-label" for="employeeFilter">
               Filtrar por matricula
-              <select id="employeeFilter">
-                <option value="">Todas as matriculas</option>
-              </select>
+              <input id="employeeFilter" type="text" placeholder="Digite a matricula que deseja pesquisar">
             </label>
             <label class="filter-label" for="vehiclePlateFilter">
               Filtrar por veiculo
@@ -274,9 +380,32 @@
         <p class="record-vehicle"></p>
         <a class="record-map-link hidden" target="_blank" rel="noopener noreferrer">Ver no Google Maps</a>
       </div>
-      <span class="record-action"></span>
+      <div class="record-card-aside">
+        <span class="record-action"></span>
+        <button type="button" class="ghost table-action record-edit-button hidden" data-edit-record>Editar registro</button>
+      </div>
     </article>
   </template>
+
+  <dialog class="apk-update-dialog" id="apkUpdateDialog">
+    <section class="apk-update-card">
+      <div>
+        <p class="eyebrow small">Atualizacao do aplicativo</p>
+        <h3 id="apkUpdateTitle">Nova versao disponivel</h3>
+        <p class="muted" id="apkUpdateMessage">Existe uma versao mais nova do APK pronta para instalar.</p>
+        <p class="apk-update-meta" id="apkUpdateMeta"></p>
+      </div>
+      <ul class="apk-update-notes hidden" id="apkUpdateNotes"></ul>
+      <p class="apk-update-required hidden" id="apkUpdateRequired">
+        Esta versao e obrigatoria para continuar usando o app sem falhas.
+      </p>
+      <div class="dialog-actions">
+        <button type="button" class="ghost" id="apkUpdateDismissButton">Depois</button>
+        <a class="ghost hidden" id="apkUpdateLink" href="#">Baixar pelo link</a>
+        <button type="button" class="primary" id="apkUpdateButton">Atualizar agora</button>
+      </div>
+    </section>
+  </dialog>
 
   <dialog class="vehicle-dialog" id="vehicleDialog">
     <form class="vehicle-form" id="vehicleForm" method="dialog">
@@ -291,7 +420,7 @@
           <option value="">Selecione uma placa</option>
         </select>
       </label>
-      <label>
+      <label id="vehicleKmField">
         KM atual
         <input id="vehicleKmInput" type="number" min="0" step="0.1" placeholder="Ex.: 125430" required>
       </label>
@@ -303,6 +432,73 @@
     </form>
   </dialog>
 
-  <script src="/app.js?v=20260312-2"></script>
+  <dialog class="vehicle-dialog" id="vehicleTransferDialog">
+    <form class="vehicle-form" id="vehicleTransferForm" method="dialog">
+      <div>
+        <p class="eyebrow small">Troca de veiculo</p>
+        <h3>Troque o veiculo sem encerrar a jornada</h3>
+        <p class="muted">Confirme o veiculo atual e escolha o novo veiculo.</p>
+      </div>
+      <label>
+        Veiculo atual
+        <input id="currentVehiclePlateInput" type="text" readonly>
+      </label>
+      <label id="currentVehicleKmField">
+        KM final do veiculo atual
+        <input id="currentVehicleKmInput" type="number" min="0" step="0.1" placeholder="Ex.: 125480" required>
+      </label>
+      <label>
+        Novo veiculo
+        <select id="nextVehicleSelectInput">
+          <option value="">Selecione a nova placa</option>
+        </select>
+      </label>
+      <label id="nextVehicleKmField">
+        KM atual do novo veiculo
+        <input id="nextVehicleKmInput" type="number" min="0" step="0.1" placeholder="Ex.: 84520" required>
+      </label>
+      <p class="feedback vehicle-feedback" id="vehicleTransferMessage"></p>
+      <div class="dialog-actions">
+        <button type="button" class="ghost" id="vehicleTransferCancelButton">Cancelar</button>
+        <button type="submit" class="primary">Salvar troca</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="vehicle-dialog" id="recordEditDialog">
+    <form class="vehicle-form" id="recordEditForm" method="dialog">
+      <div>
+        <p class="eyebrow small">Correcao administrativa</p>
+        <h3 id="recordEditTitle">Editar registro</h3>
+        <p class="muted" id="recordEditSubtitle">Ajuste o tipo da batida, horario e KM quando o registro precisar de correcao.</p>
+      </div>
+      <input id="recordEditIdInput" type="hidden">
+      <label>
+        Tipo do registro
+        <select id="recordEditActionInput" required>
+          <option value="Entrada">Inicio</option>
+          <option value="Saida para almoco">Parada</option>
+          <option value="Retorno do almoco">Retorno</option>
+          <option value="Saida">Termino</option>
+        </select>
+      </label>
+      <label>
+        Data e hora corretas
+        <input id="recordEditDateTimeInput" type="datetime-local" step="1" required>
+      </label>
+      <label>
+        KM correto
+        <input id="recordEditKmInput" type="number" min="0" step="0.1" placeholder="Ex.: 125430" required>
+      </label>
+      <p class="feedback vehicle-feedback" id="recordEditMessage"></p>
+      <div class="dialog-actions">
+        <button type="button" class="danger" id="recordEditDeleteButton">Excluir registro</button>
+        <button type="button" class="ghost" id="recordEditCancelButton">Cancelar</button>
+        <button type="submit" class="primary">Salvar correcao</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/app.js?v=20260504-01"></script>
 </body>
 </html>

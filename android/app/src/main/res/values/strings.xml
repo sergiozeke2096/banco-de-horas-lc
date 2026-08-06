@@ -4,4 +4,7 @@
     <string name="title_activity_main">LC Transporte</string>
     <string name="package_name">com.lctransporte.bancodehoras</string>
     <string name="custom_url_scheme">com.lctransporte.bancodehoras</string>
+    <string name="offline_title">Sem conexão com a internet</string>
+    <string name="offline_message">Verifique sua conexão e tente novamente.</string>
+    <string name="offline_retry">Tentar novamente</string>
 </resources>

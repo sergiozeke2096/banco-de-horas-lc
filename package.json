@@ -9,6 +9,10 @@
     "test": "node --test --test-concurrency=1",
     "android:copy": "npx cap copy android",
     "android:icons": "powershell -ExecutionPolicy Bypass -File scripts/generate-android-icons.ps1",
+    "android:build:debug": "cd android && gradlew.bat assembleDebug",
+    "android:build:release": "cd android && gradlew.bat assembleRelease",
+    "android:deploy:update": "powershell -ExecutionPolicy Bypass -File scripts/deploy-android-update.ps1",
+    "android:publish:update": "powershell -ExecutionPolicy Bypass -File scripts/publish-android-update.ps1",
     "android:sync": "npx cap sync android",
     "android:open": "npx cap open android"
   },

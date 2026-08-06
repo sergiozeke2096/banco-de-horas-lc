@@ -25,8 +25,8 @@ function buildServerConfig() {
 const config: CapacitorConfig = {
   appId: "com.lctransporte.bancodehoras",
   appName: "LC Transporte",
-  webDir: "public",
-  appendUserAgent: "LCAndroidShell/1.0",
+  webDir: "capacitor-fallback",
+  appendUserAgent: "LCAndroidShell/1.1.7",
   android: {
     allowMixedContent: false,
   },

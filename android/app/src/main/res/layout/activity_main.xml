@@ -9,4 +9,52 @@
     <WebView
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
+
+    <LinearLayout
+        android:id="@+id/offlineView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#FFFFFF"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="32dp"
+        android:visibility="gone">
+
+        <ImageView
+            android:layout_width="96dp"
+            android:layout_height="96dp"
+            android:layout_marginBottom="24dp"
+            android:src="@mipmap/ic_launcher"
+            android:contentDescription="@string/app_name" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:gravity="center"
+            android:text="@string/offline_title"
+            android:textColor="#1B4B8C"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="24dp"
+            android:gravity="center"
+            android:text="@string/offline_message"
+            android:textColor="#5A6B7A"
+            android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/btnRetry"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:backgroundTint="#1B4B8C"
+            android:paddingStart="32dp"
+            android:paddingEnd="32dp"
+            android:text="@string/offline_retry"
+            android:textColor="#FFFFFF" />
+
+    </LinearLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
