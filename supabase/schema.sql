@@ -54,6 +54,7 @@ create table if not exists public.vehicle_transfers (
 create table if not exists public.routes (
   id uuid primary key default gen_random_uuid(),
   name text not null,
+  driver text,
   created_at timestamptz not null default now()
 );
 
@@ -84,3 +85,4 @@ create index if not exists idx_vehicle_transfers_recorded_at on public.vehicle_t
 create index if not exists idx_route_stops_route_id on public.route_stops (route_id);
 create index if not exists idx_route_stops_stop_order on public.route_stops (route_id, stop_order);
 create index if not exists idx_route_stops_city on public.route_stops (city);
+create index if not exists idx_routes_driver on public.routes (driver);

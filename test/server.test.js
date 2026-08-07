@@ -2041,3 +2041,125 @@ test("funcionario nao consegue acessar rotas administrativas", async () => {
     stops: [{ city: "Joinville", address: "Rua A" }],
   })).status, 403);
 });
+
+test("rota guarda motorista e busca por motorista devolve as rotas completas dele", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+
+  await adminAgent.post("/api/admin/routes").send({
+    name: "Rota 1",
+    driver: "Jose",
+    stops: [
+      { operation: "Pick-up", city: "Blumenau", client: "Loja X", address: "Rua A, 1" },
+      { operation: "Minidrop", city: "Gaspar", client: "Loja Y", address: "Rua B, 2" },
+    ],
+  });
+  await adminAgent.post("/api/admin/routes").send({
+    name: "Rota 2",
+    driver: "Jose",
+    stops: [{ operation: "Pick-up", city: "Itajai", address: "Rua C, 3" }],
+  });
+  await adminAgent.post("/api/admin/routes").send({
+    name: "Rota unica",
+    driver: "Maria",
+    stops: [{ operation: "Pick-up", city: "Brusque", address: "Rua D, 4" }],
+  });
+
+  const driversResponse = await adminAgent.get("/api/admin/routes/drivers");
+  assert.equal(driversResponse.status, 200);
+  assert.deepEqual(
+    driversResponse.body.drivers.sort((a, b) => a.driver.localeCompare(b.driver)),
+    [{ driver: "Jose", routeCount: 2 }, { driver: "Maria", routeCount: 1 }]
+  );
+
+  const searchResponse = await adminAgent.get("/api/admin/routes").query({ driver: "jose" });
+  assert.equal(searchResponse.status, 200);
+  assert.equal(searchResponse.body.routes.length, 2);
+  assert.ok(searchResponse.body.routes.every((route) => route.driver === "Jose"));
+  const routeWithStops = searchResponse.body.routes.find((route) => route.name === "Rota 1");
+  assert.equal(routeWithStops.stops.length, 2);
+  assert.equal(routeWithStops.stops[0].city, "Blumenau");
+});
+
+test("admin edita rota substituindo nome, motorista e todas as paradas", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+
+  const createResponse = await adminAgent.post("/api/admin/routes").send({
+    name: "Rota original",
+    driver: "Carlos",
+    stops: [{ operation: "Pick-up", city: "Joinville", address: "Rua Antiga, 1" }],
+  });
+  const routeId = createResponse.body.route.id;
+
+  const updateResponse = await adminAgent.put(`/api/admin/routes/${routeId}`).send({
+    name: "Rota corrigida",
+    driver: "Carlos Eduardo",
+    stops: [
+      { operation: "Minidrop", city: "Joinville", address: "Rua Corrigida, 2" },
+      { operation: "Pick-up", city: "Araquari", address: "Rua Nova, 3" },
+    ],
+  });
+  assert.equal(updateResponse.status, 200);
+  assert.equal(updateResponse.body.route.name, "Rota corrigida");
+  assert.equal(updateResponse.body.route.driver, "Carlos Eduardo");
+  assert.equal(updateResponse.body.route.stopCount, 2);
+
+  const detailResponse = await adminAgent.get(`/api/admin/routes/${routeId}`);
+  assert.equal(detailResponse.body.route.stops.length, 2);
+  assert.equal(detailResponse.body.route.stops[0].address, "Rua Corrigida, 2");
+
+  const araquariResponse = await adminAgent.get("/api/admin/routes").query({ city: "Araquari" });
+  assert.equal(araquariResponse.body.stops.length, 1);
+  assert.equal(araquariResponse.body.stops[0].routeName, "Rota corrigida");
+});
+
+test("edicao de rota inexistente devolve 404 e edicao invalida nao apaga as paradas antigas", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+
+  const missingResponse = await adminAgent.put("/api/admin/routes/999999").send({
+    name: "Nao existe",
+    stops: [{ city: "Joinville", address: "Rua A" }],
+  });
+  assert.equal(missingResponse.status, 404);
+
+  const createResponse = await adminAgent.post("/api/admin/routes").send({
+    name: "Rota para tentativa invalida",
+    stops: [{ city: "Joinville", address: "Rua Original, 1" }],
+  });
+  const routeId = createResponse.body.route.id;
+
+  const invalidResponse = await adminAgent.put(`/api/admin/routes/${routeId}`).send({
+    name: "",
+    stops: [{ city: "Joinville", address: "Rua Nova" }],
+  });
+  assert.equal(invalidResponse.status, 400);
+
+  const detailResponse = await adminAgent.get(`/api/admin/routes/${routeId}`);
+  assert.equal(detailResponse.body.route.stops.length, 1);
+  assert.equal(detailResponse.body.route.stops[0].address, "Rua Original, 1");
+});
+
+test("funcionario nao consegue listar motoristas nem editar rota", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  await registerEmployee(adminAgent, "9905", "Sem acesso a edicao de rotas");
+
+  const createResponse = await adminAgent.post("/api/admin/routes").send({
+    name: "Rota protegida",
+    driver: "Zeca",
+    stops: [{ city: "Joinville", address: "Rua A" }],
+  });
+  const routeId = createResponse.body.route.id;
+
+  const employeeAgent = request.agent(app);
+  await login(employeeAgent, "9905", "senha-funcionario");
+
+  assert.equal((await employeeAgent.get("/api/admin/routes/drivers")).status, 403);
+  assert.equal((await employeeAgent.get("/api/admin/routes").query({ driver: "Zeca" })).status, 403);
+  assert.equal((await employeeAgent.put(`/api/admin/routes/${routeId}`).send({
+    name: "Tentativa",
+    stops: [{ city: "Joinville", address: "Rua A" }],
+  })).status, 403);
+});

@@ -366,21 +366,26 @@
           <article class="admin-block">
             <div class="admin-block-head">
               <div>
-                <h4>Cadastrar rota</h4>
+                <h4 id="routeFormTitle">Cadastrar rota</h4>
+                <p class="muted route-editing-hint hidden" id="routeEditingHint"></p>
               </div>
               <button type="button" class="secondary" id="toggleRouteRegisterButton">Nova rota</button>
             </div>
             <form id="routeRegisterForm" class="stack hidden">
               <label>
+                Motorista
+                <input id="registerRouteDriver" type="text" placeholder="Ex.: Leandro">
+              </label>
+              <label>
                 Nome da rota
-                <input id="registerRouteName" type="text" placeholder="Ex.: Leandro - 06/08/2026" required>
+                <input id="registerRouteName" type="text" placeholder="Ex.: Rota 1 - 06/08/2026" required>
               </label>
               <label>
                 Paradas (uma por linha: Operacao, Cidade, Cliente, Endereco, Contato)
                 <textarea id="registerRouteStops" class="route-addresses-input" rows="10" placeholder="Cole aqui direto do Excel/print. Uma parada por linha, campos separados por Tab ou por |&#10;Pick-up | Blumenau | Loja Vestis | Rua Dr. Pedro Zimmermann, 2833 | (47) 99920-8255&#10;Minidrop | Joinville | SC-W-MD009 | Rua Boehmerwald N 2788 | 47991770696" required></textarea>
               </label>
-              <p class="muted route-form-hint">Cidade e Endereco sao obrigatorios em cada linha. Operacao, Cliente e Contato podem ficar em branco.</p>
-              <button type="submit" class="secondary">Salvar rota</button>
+              <p class="muted route-form-hint">Cidade e Endereco sao obrigatorios em cada linha. Motorista, Operacao, Cliente e Contato podem ficar em branco.</p>
+              <button type="submit" class="secondary" id="routeSubmitButton">Salvar rota</button>
             </form>
             <p class="feedback manager-feedback" id="routeManagerMessage"></p>
             <div class="admin-search-panel">
@@ -396,6 +401,20 @@
             </div>
             <div class="routes-results" id="routesResults">
               <p class="muted">Busque uma cidade para ver os enderecos cadastrados.</p>
+            </div>
+            <div class="admin-search-panel">
+              <label class="filter-label" for="routeDriverSearchInput">
+                Buscar rotas por motorista
+                <input id="routeDriverSearchInput" type="text" list="routeDriverSuggestions" placeholder="Ex.: Leandro ou Ernandes LC">
+              </label>
+              <datalist id="routeDriverSuggestions"></datalist>
+              <div class="filter-actions">
+                <button type="button" class="secondary" id="searchRouteDriverButton">Buscar rotas</button>
+                <button type="button" class="ghost" id="clearRouteDriverSearchButton">Limpar busca</button>
+              </div>
+            </div>
+            <div class="routes-results" id="routeDriverResults">
+              <p class="muted">Busque um motorista para ver as rotas dele.</p>
             </div>
           </article>
         </div>

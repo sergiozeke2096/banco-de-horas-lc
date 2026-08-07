@@ -272,6 +272,17 @@ Trabalho feito **apenas localmente** ainda, sem publicar na VPS. Sao mudancas so
 - **Consequencia importante**: o endpoint `DELETE /api/admin/routes/:routeId` continua existindo no backend (ainda testado, ainda funciona), mas agora **nao ha mais nenhum jeito de excluir uma rota pela interface**. Se o usuario precisar excluir uma rota, por enquanto so via API/script ou pedindo para uma sessao futura reativar algum jeito de fazer isso na UI.
 - `npm test` segue `73/73` (mudanca so de frontend).
 
+## Rotas: campo de motorista + edicao completa em 07/08/2026
+
+- O usuario pediu tres coisas: (1) poder editar qualquer rota cadastrada, (2) separar/organizar rotas por motorista com busca propria por motorista, (3) todos os textos editaveis.
+- `routes` ganhou coluna `driver` (opcional — nem toda rota tem motorista conhecido, ex.: as 4 rotas nomeadas por hub tipo "Brusque x Hub Blumenau - Direto 1" nao tinham motorista preenchido nos prints originais).
+- Novos endpoints: `GET /api/admin/routes/drivers` (motoristas com contagem de rotas, mesmo padrao de `/cities`), `GET /api/admin/routes?driver=X` (devolve as rotas **inteiras** daquele motorista, cada uma com a lista completa de paradas — diferente da busca por cidade, que e stop-flat), `PUT /api/admin/routes/:routeId` (substitui nome, motorista e **todas** as paradas de uma vez, mesma validacao do POST; se a validacao falhar, nao mexe nos dados antigos).
+- UI ganhou: campo "Motorista" no formulario de cadastro; segunda busca "Buscar rotas por motorista" (resultado agrupado por rota, com lista de paradas aninhada, ja que aqui faz sentido ver a rota inteira de uma vez); botao "Editar" em cada rota da busca por motorista e botao "Editar rota" em cada endereco da busca por cidade — os dois abrem o mesmo formulario de cadastro, mas pre-preenchido (nome, motorista, e o textarea reconstruido no mesmo formato de colagem `Operacao | Cidade | Cliente | Endereco | Contato`) e trocam para modo edicao (titulo "Editar rota", botao "Salvar edicao", PUT em vez de POST).
+- Editar e simplesmente reabrir o texto e deixar o admin corrigir/adicionar/remover linhas livremente antes de salvar — nao existe edicao campo-a-campo por parada. Isso cobre "todos os textos editaveis" sem precisar de um formulario por parada.
+- Bug pego e corrigido durante o teste manual: a mensagem de sucesso ("Rota atualizada...") estava sendo apagada na hora pelo refresh automatico da busca (que tambem seta a mensagem). Corrigido movendo o `setRouteManagerMessage` de sucesso para depois de todos os refreshes.
+- 4 testes novos de integracao (motorista + busca, edicao completa, 404/edicao invalida preserva dados antigos, funcionario sem acesso). Suite: `77/77`.
+- Dados reais re-seedados com motorista: rotas com nome "Leandro - X" / "Ernandes LC - X" tiveram o motorista extraido do prefixo (script atualizado em `seed-real-routes.js` no scratchpad, nao versionado). As 4 rotas de hub e a "Coletas destacadas" ficaram sem motorista, como nos prints originais.
+
 ## Validacoes locais recentes
 
 - `npm test` passou com `63/63` em `05/08/2026` apos a automacao de pendencias (`16` testes novos de regra + `3` de endpoint).

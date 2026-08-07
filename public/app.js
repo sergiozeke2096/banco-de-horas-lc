@@ -15,9 +15,13 @@ const state = {
   weekSummary: null,
   adminTab: "overview",
   showRouteRegisterForm: false,
+  editingRouteId: null,
   routeCities: [],
   routeSearchCity: "",
   routeStopResults: [],
+  routeDrivers: [],
+  routeSearchDriver: "",
+  routeDriverResults: [],
   summaryCollapsed: false,
   aggregatesCollapsed: false,
   alertsCollapsed: false,
@@ -99,6 +103,10 @@ const adminTabRotas = document.querySelector("#adminTabRotas");
 const adminOverviewDot = document.querySelector("#adminOverviewDot");
 const toggleRouteRegisterButton = document.querySelector("#toggleRouteRegisterButton");
 const routeRegisterForm = document.querySelector("#routeRegisterForm");
+const routeFormTitle = document.querySelector("#routeFormTitle");
+const routeEditingHint = document.querySelector("#routeEditingHint");
+const routeSubmitButton = document.querySelector("#routeSubmitButton");
+const registerRouteDriver = document.querySelector("#registerRouteDriver");
 const registerRouteName = document.querySelector("#registerRouteName");
 const registerRouteStops = document.querySelector("#registerRouteStops");
 const routeManagerMessage = document.querySelector("#routeManagerMessage");
@@ -107,6 +115,11 @@ const routeCitySuggestions = document.querySelector("#routeCitySuggestions");
 const searchRoutesButton = document.querySelector("#searchRoutesButton");
 const clearRouteSearchButton = document.querySelector("#clearRouteSearchButton");
 const routesResults = document.querySelector("#routesResults");
+const routeDriverSearchInput = document.querySelector("#routeDriverSearchInput");
+const routeDriverSuggestions = document.querySelector("#routeDriverSuggestions");
+const searchRouteDriverButton = document.querySelector("#searchRouteDriverButton");
+const clearRouteDriverSearchButton = document.querySelector("#clearRouteDriverSearchButton");
+const routeDriverResults = document.querySelector("#routeDriverResults");
 const recordsSection = document.querySelector("#recordsSection");
 const alertsPanel = document.querySelector("#alertsPanel");
 const alertsTitle = document.querySelector("#alertsTitle");
@@ -1673,7 +1686,18 @@ function renderRouteRegisterForm() {
   }
 
   routeRegisterForm.classList.toggle("hidden", !state.showRouteRegisterForm);
+
+  const isEditing = Boolean(state.editingRouteId);
   toggleRouteRegisterButton.textContent = state.showRouteRegisterForm ? "Cancelar" : "Nova rota";
+  if (routeFormTitle) {
+    routeFormTitle.textContent = isEditing ? "Editar rota" : "Cadastrar rota";
+  }
+  if (routeSubmitButton) {
+    routeSubmitButton.textContent = isEditing ? "Salvar edicao" : "Salvar rota";
+  }
+  if (routeEditingHint) {
+    routeEditingHint.classList.toggle("hidden", !isEditing);
+  }
 }
 
 function handleToggleRouteRegisterForm() {
@@ -1681,7 +1705,14 @@ function handleToggleRouteRegisterForm() {
     return;
   }
 
-  state.showRouteRegisterForm = !state.showRouteRegisterForm;
+  const wasOpen = state.showRouteRegisterForm;
+  state.showRouteRegisterForm = !wasOpen;
+  if (wasOpen) {
+    // Fechar cancela qualquer edicao em andamento, para nao deixar o
+    // formulario "preso" em modo de edicao na proxima vez que abrir.
+    state.editingRouteId = null;
+    routeRegisterForm?.reset();
+  }
   renderRouteRegisterForm();
 }
 
@@ -1711,6 +1742,32 @@ async function loadRouteCities() {
   renderRouteCitySuggestions();
 }
 
+function renderRouteDriverSuggestions() {
+  if (!routeDriverSuggestions) {
+    return;
+  }
+
+  routeDriverSuggestions.innerHTML = "";
+  for (const entry of state.routeDrivers) {
+    const option = document.createElement("option");
+    option.value = entry.driver;
+    option.textContent = `${entry.driver} (${entry.routeCount})`;
+    routeDriverSuggestions.appendChild(option);
+  }
+}
+
+async function loadRouteDrivers() {
+  if (state.user?.role !== "admin") {
+    state.routeDrivers = [];
+    renderRouteDriverSuggestions();
+    return;
+  }
+
+  const data = await api("/api/admin/routes/drivers");
+  state.routeDrivers = data.drivers || [];
+  renderRouteDriverSuggestions();
+}
+
 // Cada linha colada vira uma parada: Operacao, Cidade, Cliente, Endereco,
 // Contato, nessa ordem. Aceita Tab (o que sai ao colar do Excel/Sheets) ou "|"
 // (para quem preferir digitar a mao). Linhas sem cidade ou sem endereco sao
@@ -1730,6 +1787,14 @@ function parseRouteStopsInput(rawText) {
     .filter((stop) => stop.city && stop.address);
 }
 
+// Caminho inverso do parse acima, usado para pre-preencher o formulario ao
+// editar uma rota existente com o mesmo formato que o admin usa para colar.
+function stopsToTextareaValue(stops) {
+  return stops
+    .map((stop) => [stop.operation, stop.city, stop.client, stop.address, stop.contact].join(" | "))
+    .join("\n");
+}
+
 async function handleRouteRegister(event) {
   event.preventDefault();
 
@@ -1740,23 +1805,60 @@ async function handleRouteRegister(event) {
   }
 
   const payload = {
+    driver: registerRouteDriver.value.trim(),
     name: registerRouteName.value.trim(),
     stops,
   };
 
+  const isEditing = Boolean(state.editingRouteId);
+
   try {
-    const data = await api("/api/admin/routes", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    const data = isEditing
+      ? await api(`/api/admin/routes/${state.editingRouteId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      })
+      : await api("/api/admin/routes", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
     routeRegisterForm.reset();
-    setRouteManagerMessage(`Rota "${data.route.name}" cadastrada com ${data.route.stopCount} parada(s).`);
+    state.editingRouteId = null;
     state.showRouteRegisterForm = false;
     renderRouteRegisterForm();
     await loadRouteCities();
+    await loadRouteDrivers();
     if (state.routeSearchCity) {
       await handleSearchRoutes();
     }
+    if (state.routeSearchDriver) {
+      await handleSearchRouteDrivers();
+    }
+    // Mensagem de sucesso e a ultima coisa, depois de qualquer refresh
+    // automatico das buscas (que tambem mexem nessa mensagem).
+    setRouteManagerMessage(
+      isEditing
+        ? `Rota "${data.route.name}" atualizada com ${data.route.stopCount} parada(s).`
+        : `Rota "${data.route.name}" cadastrada com ${data.route.stopCount} parada(s).`
+    );
+  } catch (error) {
+    setRouteManagerMessage(error.message, true);
+  }
+}
+
+async function handleEditRoute(routeId) {
+  try {
+    const data = await api(`/api/admin/routes/${routeId}`);
+    const route = data.route;
+    registerRouteDriver.value = route.driver || "";
+    registerRouteName.value = route.name || "";
+    registerRouteStops.value = stopsToTextareaValue(route.stops || []);
+    state.editingRouteId = route.id;
+    state.showRouteRegisterForm = true;
+    setRouteManagerMessage("");
+    renderRouteRegisterForm();
+    routeRegisterForm?.scrollIntoView({ block: "start", behavior: "smooth" });
   } catch (error) {
     setRouteManagerMessage(error.message, true);
   }
@@ -1797,7 +1899,10 @@ function renderRoutesResults() {
               ${contactLine}
             </div>
           </div>
-          <p class="route-source">Rota: ${escapeHtml(stop.routeName || "-")}</p>
+          <div class="route-source-row">
+            <p class="route-source">Rota: ${escapeHtml(stop.routeName || "-")}</p>
+            <button type="button" class="ghost table-action" data-edit-route="${stop.routeId}">Editar rota</button>
+          </div>
         </article>
       `;
     })
@@ -1828,6 +1933,85 @@ function handleClearRouteSearch() {
   state.routeStopResults = [];
   setRouteManagerMessage("");
   renderRoutesResults();
+}
+
+function renderRouteDriverResults() {
+  if (!routeDriverResults) {
+    return;
+  }
+
+  if (!state.routeSearchDriver) {
+    routeDriverResults.innerHTML = '<p class="muted">Busque um motorista para ver as rotas dele.</p>';
+    return;
+  }
+
+  if (!state.routeDriverResults.length) {
+    routeDriverResults.innerHTML = `<p class="muted">Nenhuma rota cadastrada para ${escapeHtml(state.routeSearchDriver)}.</p>`;
+    return;
+  }
+
+  routeDriverResults.innerHTML = state.routeDriverResults
+    .map((route) => {
+      const stopsHtml = (route.stops || [])
+        .map((stop) => {
+          const opBadge = stop.operation ? `<span class="route-op-badge">${escapeHtml(stop.operation)}</span>` : "";
+          const clientPart = stop.client ? `${escapeHtml(stop.client)} - ` : "";
+          const contactPart = stop.contact ? ` - Contato: ${escapeHtml(stop.contact)}` : "";
+          return `<li class="route-stops-item">${opBadge}${clientPart}${escapeHtml(stop.city)}, ${escapeHtml(stop.address)}${contactPart}</li>`;
+        })
+        .join("");
+
+      return `
+        <article class="route-card">
+          <div class="route-card-head">
+            <div>
+              <h4 class="route-name">${escapeHtml(route.name)}</h4>
+              <p class="route-meta">Motorista: ${escapeHtml(route.driver || "-")} - ${route.stopCount} parada${route.stopCount === 1 ? "" : "s"} - ${escapeHtml(formatCreatedAt(route.createdAt))}</p>
+            </div>
+            <div class="route-card-actions">
+              <button type="button" class="ghost table-action" data-edit-route="${route.id}">Editar</button>
+            </div>
+          </div>
+          <ul class="route-stops-list">${stopsHtml}</ul>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+async function handleSearchRouteDrivers() {
+  const driver = routeDriverSearchInput.value.trim();
+  if (!driver) {
+    setRouteManagerMessage("Digite um motorista para buscar.", true);
+    return;
+  }
+
+  try {
+    const data = await api(`/api/admin/routes${buildQueryString({ driver })}`);
+    state.routeSearchDriver = data.driver;
+    state.routeDriverResults = data.routes || [];
+    setRouteManagerMessage("");
+    renderRouteDriverResults();
+  } catch (error) {
+    setRouteManagerMessage(error.message, true);
+  }
+}
+
+function handleClearRouteDriverSearch() {
+  routeDriverSearchInput.value = "";
+  state.routeSearchDriver = "";
+  state.routeDriverResults = [];
+  setRouteManagerMessage("");
+  renderRouteDriverResults();
+}
+
+function handleRouteResultsEditClick(event) {
+  const editButton = event.target.closest("[data-edit-route]");
+  if (!editButton) {
+    return;
+  }
+
+  handleEditRoute(editButton.dataset.editRoute);
 }
 
 function renderSession() {
@@ -1869,6 +2053,7 @@ function renderSession() {
   renderAlerts();
   renderRouteRegisterForm();
   renderRoutesResults();
+  renderRouteDriverResults();
   renderAdminTabs();
 }
 
@@ -1910,6 +2095,7 @@ async function loadSession() {
       await loadEmployees();
       await loadAdminInsights();
       await loadRouteCities();
+      await loadRouteDrivers();
     } else {
       await loadVehicleContext();
       await loadWeekSummary();
@@ -2236,11 +2422,18 @@ async function handleLogout() {
   state.vehicleManageSearchApplied = "";
   state.adminTab = "overview";
   state.showRouteRegisterForm = false;
+  state.editingRouteId = null;
   state.routeCities = [];
   state.routeSearchCity = "";
   state.routeStopResults = [];
+  state.routeDrivers = [];
+  state.routeSearchDriver = "";
+  state.routeDriverResults = [];
   if (routeCitySearchInput) {
     routeCitySearchInput.value = "";
+  }
+  if (routeDriverSearchInput) {
+    routeDriverSearchInput.value = "";
   }
   state.adminFilters = {
     employeeId: "",
@@ -3290,6 +3483,10 @@ bindEvent(toggleRouteRegisterButton, "click", handleToggleRouteRegisterForm);
 bindEvent(routeRegisterForm, "submit", handleRouteRegister);
 bindEvent(searchRoutesButton, "click", handleSearchRoutes);
 bindEvent(clearRouteSearchButton, "click", handleClearRouteSearch);
+bindEvent(routesResults, "click", handleRouteResultsEditClick);
+bindEvent(searchRouteDriverButton, "click", handleSearchRouteDrivers);
+bindEvent(clearRouteDriverSearchButton, "click", handleClearRouteDriverSearch);
+bindEvent(routeDriverResults, "click", handleRouteResultsEditClick);
 bindEvent(vehicleDialog, "cancel", handleVehicleCancel);
 bindEvent(vehicleDialog, "close", handleVehicleDialogClose);
 bindEvent(vehicleTransferForm, "submit", handleVehicleTransferSubmit);

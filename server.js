@@ -117,6 +117,7 @@ function serializeRoute(route, stops) {
   return {
     id: route.id,
     name: route.name,
+    driver: route.driver || "",
     createdAt: route.created_at,
     stopCount: stops ? stops.length : undefined,
     stops: stops ? stops.map((stop) => serializeRouteStop(stop, route)) : undefined,
@@ -232,7 +233,7 @@ async function validateSupabaseSchema() {
       table: "routes",
       query: supabase
         .from("routes")
-        .select("id, name", { head: true, count: "exact" })
+        .select("id, name, driver", { head: true, count: "exact" })
         .limit(1),
     },
     {
@@ -1127,9 +1128,10 @@ async function listRouteStopsForRoute(routeId) {
     .sort((left, right) => left.stop_order - right.stop_order);
 }
 
-async function insertRoute(name) {
+async function insertRoute(name, driver) {
   const payload = {
     name: String(name).trim(),
+    driver: String(driver || "").trim(),
   };
 
   if (storageMode === "supabase") {
@@ -1149,6 +1151,45 @@ async function insertRoute(name) {
   };
   localRoutes.push(route);
   return route;
+}
+
+async function updateRoute(routeId, name, driver) {
+  const payload = {
+    name: String(name).trim(),
+    driver: String(driver || "").trim(),
+  };
+
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("routes")
+        .update(payload)
+        .eq("id", routeId)
+        .select("*")
+        .maybeSingle()
+    );
+  }
+
+  const route = localRoutes.find((item) => isSameEntityId(item.id, routeId));
+  if (!route) {
+    return null;
+  }
+
+  Object.assign(route, payload);
+  return route;
+}
+
+async function deleteRouteStopsForRoute(routeId) {
+  if (storageMode === "supabase") {
+    const { error } = await supabase.from("route_stops").delete().eq("route_id", routeId);
+    if (error) {
+      throw error;
+    }
+    return true;
+  }
+
+  localRouteStops = localRouteStops.filter((stop) => !isSameEntityId(stop.route_id, routeId));
+  return true;
 }
 
 async function insertRouteStops(routeId, stops) {
@@ -1831,6 +1872,37 @@ function normalizeCityKey(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizeDriverKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function parseAndValidateRouteBody(body) {
+  const { name, driver, stops } = body || {};
+  const normalizedName = String(name || "").trim();
+  const normalizedDriver = String(driver || "").trim();
+  const normalizedStops = Array.isArray(stops)
+    ? stops
+      .map((stop) => ({
+        operation: String(stop?.operation || "").trim(),
+        city: String(stop?.city || "").trim(),
+        client: String(stop?.client || "").trim(),
+        address: String(stop?.address || "").trim(),
+        contact: String(stop?.contact || "").trim(),
+      }))
+      .filter((stop) => stop.city && stop.address)
+    : [];
+
+  if (!normalizedName) {
+    return { error: "Informe um nome para a rota." };
+  }
+
+  if (!normalizedStops.length) {
+    return { error: "Informe ao menos um endereco com cidade para a rota." };
+  }
+
+  return { name: normalizedName, driver: normalizedDriver, stops: normalizedStops };
+}
+
 app.get("/api/admin/routes/cities", requireAdmin, asyncRoute(async (_req, res) => {
   const stops = await listAllRouteStops();
   const countsByCity = new Map();
@@ -1854,37 +1926,85 @@ app.get("/api/admin/routes/cities", requireAdmin, asyncRoute(async (_req, res) =
   return res.json({ cities });
 }));
 
-// Sem ?city, lista todas as rotas (um PDF/print cada) para o admin gerenciar
-// (ver quantos enderecos tem, excluir). Com ?city, devolve os enderecos daquela
-// cidade juntando todas as rotas, ja que um mesmo PDF pode misturar cidades.
-app.get("/api/admin/routes", requireAdmin, asyncRoute(async (req, res) => {
-  const city = String(req.query.city || "").trim();
+app.get("/api/admin/routes/drivers", requireAdmin, asyncRoute(async (_req, res) => {
+  const routes = await listAllRoutes();
+  const countsByDriver = new Map();
 
-  if (!city) {
-    const [allRoutes, allStops] = await Promise.all([listAllRoutes(), listAllRouteStops()]);
-    const stopCountByRoute = new Map();
-    for (const stop of allStops) {
-      const key = String(stop.route_id);
-      stopCountByRoute.set(key, (stopCountByRoute.get(key) || 0) + 1);
+  for (const route of routes) {
+    const driver = String(route.driver || "").trim();
+    if (!driver) {
+      continue;
     }
 
-    const routes = allRoutes.map((route) => ({
-      ...serializeRoute(route),
-      stopCount: stopCountByRoute.get(String(route.id)) || 0,
-    }));
-
-    return res.json({ routes });
+    const key = normalizeDriverKey(driver);
+    const current = countsByDriver.get(key) || { driver, routeCount: 0 };
+    current.routeCount += 1;
+    countsByDriver.set(key, current);
   }
 
-  const cityKey = normalizeCityKey(city);
-  const [allRoutes, allStops] = await Promise.all([listAllRoutes(), listAllRouteStops()]);
-  const routeById = new Map(allRoutes.map((route) => [String(route.id), route]));
-  const matchingStops = allStops
-    .filter((stop) => normalizeCityKey(stop.city) === cityKey)
-    .map((stop) => serializeRouteStop(stop, routeById.get(String(stop.route_id))))
-    .sort((left, right) => String(left.routeName || "").localeCompare(String(right.routeName || ""), "pt-BR"));
+  const drivers = [...countsByDriver.values()].sort((left, right) => (
+    left.driver.localeCompare(right.driver, "pt-BR")
+  ));
 
-  return res.json({ city, stops: matchingStops });
+  return res.json({ drivers });
+}));
+
+// Sem ?city nem ?driver, lista todas as rotas (resumo). Com ?city, devolve os
+// enderecos daquela cidade juntando todas as rotas (um PDF pode misturar
+// cidades). Com ?driver, devolve as rotas inteiras daquele motorista, cada
+// uma com as paradas completas, para editar ou conferir a rota toda.
+app.get("/api/admin/routes", requireAdmin, asyncRoute(async (req, res) => {
+  const city = String(req.query.city || "").trim();
+  const driver = String(req.query.driver || "").trim();
+
+  if (driver) {
+    const driverKey = normalizeDriverKey(driver);
+    const [allRoutes, allStops] = await Promise.all([listAllRoutes(), listAllRouteStops()]);
+    const stopsByRoute = new Map();
+    for (const stop of allStops) {
+      const key = String(stop.route_id);
+      if (!stopsByRoute.has(key)) {
+        stopsByRoute.set(key, []);
+      }
+      stopsByRoute.get(key).push(stop);
+    }
+
+    const routes = allRoutes
+      .filter((route) => normalizeDriverKey(route.driver) === driverKey)
+      .map((route) => {
+        const stops = (stopsByRoute.get(String(route.id)) || []).sort((left, right) => left.stop_order - right.stop_order);
+        return serializeRoute(route, stops);
+      })
+      .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+
+    return res.json({ driver, routes });
+  }
+
+  if (city) {
+    const cityKey = normalizeCityKey(city);
+    const [allRoutes, allStops] = await Promise.all([listAllRoutes(), listAllRouteStops()]);
+    const routeById = new Map(allRoutes.map((route) => [String(route.id), route]));
+    const matchingStops = allStops
+      .filter((stop) => normalizeCityKey(stop.city) === cityKey)
+      .map((stop) => serializeRouteStop(stop, routeById.get(String(stop.route_id))))
+      .sort((left, right) => String(left.routeName || "").localeCompare(String(right.routeName || ""), "pt-BR"));
+
+    return res.json({ city, stops: matchingStops });
+  }
+
+  const [allRoutes, allStops] = await Promise.all([listAllRoutes(), listAllRouteStops()]);
+  const stopCountByRoute = new Map();
+  for (const stop of allStops) {
+    const key = String(stop.route_id);
+    stopCountByRoute.set(key, (stopCountByRoute.get(key) || 0) + 1);
+  }
+
+  const routes = allRoutes.map((route) => ({
+    ...serializeRoute(route),
+    stopCount: stopCountByRoute.get(String(route.id)) || 0,
+  }));
+
+  return res.json({ routes });
 }));
 
 app.get("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) => {
@@ -1898,31 +2018,34 @@ app.get("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) 
 }));
 
 app.post("/api/admin/routes", requireAdmin, asyncRoute(async (req, res) => {
-  const { name, stops } = req.body || {};
-  const normalizedName = String(name || "").trim();
-  const normalizedStops = Array.isArray(stops)
-    ? stops
-      .map((stop) => ({
-        operation: String(stop?.operation || "").trim(),
-        city: String(stop?.city || "").trim(),
-        client: String(stop?.client || "").trim(),
-        address: String(stop?.address || "").trim(),
-        contact: String(stop?.contact || "").trim(),
-      }))
-      .filter((stop) => stop.city && stop.address)
-    : [];
-
-  if (!normalizedName) {
-    return res.status(400).json({ error: "Informe um nome para a rota." });
+  const parsed = parseAndValidateRouteBody(req.body);
+  if (parsed.error) {
+    return res.status(400).json({ error: parsed.error });
   }
 
-  if (!normalizedStops.length) {
-    return res.status(400).json({ error: "Informe ao menos um endereco com cidade para a rota." });
-  }
-
-  const route = await insertRoute(normalizedName);
-  const insertedStops = await insertRouteStops(route.id, normalizedStops);
+  const route = await insertRoute(parsed.name, parsed.driver);
+  const insertedStops = await insertRouteStops(route.id, parsed.stops);
   return res.status(201).json({ route: serializeRoute(route, insertedStops) });
+}));
+
+// Edicao substitui nome, motorista e a lista inteira de paradas (mesmo
+// formato de colagem usado no cadastro), para corrigir qualquer texto
+// transcrito errado sem precisar de um formulario por campo.
+app.put("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) => {
+  const existingRoute = await getRouteById(req.params.routeId);
+  if (!existingRoute) {
+    return res.status(404).json({ error: "Rota nao encontrada." });
+  }
+
+  const parsed = parseAndValidateRouteBody(req.body);
+  if (parsed.error) {
+    return res.status(400).json({ error: parsed.error });
+  }
+
+  const updatedRoute = await updateRoute(existingRoute.id, parsed.name, parsed.driver);
+  await deleteRouteStopsForRoute(existingRoute.id);
+  const insertedStops = await insertRouteStops(existingRoute.id, parsed.stops);
+  return res.json({ route: serializeRoute(updatedRoute, insertedStops) });
 }));
 
 app.delete("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) => {
