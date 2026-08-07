@@ -196,6 +196,15 @@ Trabalho feito **apenas localmente** ainda, sem publicar na VPS. Sao mudancas so
 - Validado no navegador local (porta `3111`) nos dois tamanhos: as 3 abas trocam de conteudo corretamente, a tela do funcionario nao foi afetada (registros seguem sempre visiveis, abas do admin ficam escondidas), e a marca d'agua aparece discreta atras do card de login.
 - `npm test` segue `63/63` (mudanca so de frontend, suite de backend nao foi afetada).
 
+## Hero da tela de login redesenhado em 06/08/2026
+
+- O usuario mandou print reclamando que a logo ficava espremida num canto (grid de 2 colunas: texto a esquerda, logo pequena a direita), e pediu visual melhor que valorizasse a logo.
+- `.auth-card-head` deixou de ser grid de 2 colunas (texto | logo) e virou hero vertical centralizado: logo grande com o anel LC primeiro, depois eyebrow + titulo + relogio, tudo centralizado, em [public/index.html](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/public/index.html) e [public/styles.css](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/public/styles.css).
+- `.hero-brand-circle` cresceu de `210px -> 250px` no desktop e `160px -> 190px` no mobile.
+- Removida a `<p class="lead auth-lead">` e a `<p class="brand-caption">`: as duas eram tags vazias sem conteudo (nunca preenchidas por JS), ficaram para tras de uma versao anterior da tela.
+- Validado em navegador local nos dois tamanhos; `npm test` 63/63.
+- **Combinado com o usuario em 06/08/2026: as mudancas vao se acumulando localmente nesta branch, e o deploy (VPS + APK) so acontece quando o usuario disser que esta tudo pronto para subir.** Nao subir nada por conta propria antes disso.
+
 ## Validacoes locais recentes
 
 - `npm test` passou com `63/63` em `05/08/2026` apos a automacao de pendencias (`16` testes novos de regra + `3` de endpoint).
