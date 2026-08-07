@@ -28,10 +28,14 @@ let localUsers = [];
 let localRecords = [];
 let localVehicles = [];
 let localVehicleTransfers = [];
+let localRoutes = [];
+let localRouteStops = [];
 let localUserSequence = 1;
 let localRecordSequence = 1;
 let localVehicleSequence = 1;
 let localVehicleTransferSequence = 1;
+let localRouteSequence = 1;
+let localRouteStopSequence = 1;
 let initializationPromise = null;
 
 const trustProxyValue = process.env.TRUST_PROXY;
@@ -92,6 +96,25 @@ function serializeVehicleWithUsage(vehicle, usage) {
         employeeName: usage.employeeName,
       }
       : null,
+  };
+}
+
+function serializeRouteStop(stop) {
+  return {
+    id: stop.id,
+    address: stop.address,
+    order: stop.stop_order,
+  };
+}
+
+function serializeRoute(route, stops) {
+  return {
+    id: route.id,
+    city: route.city,
+    name: route.name,
+    createdAt: route.created_at,
+    stopCount: stops ? stops.length : undefined,
+    stops: stops ? stops.map(serializeRouteStop) : undefined,
   };
 }
 
@@ -198,6 +221,20 @@ async function validateSupabaseSchema() {
           "id, user_id, employee_name, employee_id, from_vehicle_plate, from_vehicle_km, to_vehicle_plate, to_vehicle_km, recorded_at, local_date, local_time",
           { head: true, count: "exact" }
         )
+        .limit(1),
+    },
+    {
+      table: "routes",
+      query: supabase
+        .from("routes")
+        .select("id, city, name", { head: true, count: "exact" })
+        .limit(1),
+    },
+    {
+      table: "route_stops",
+      query: supabase
+        .from("route_stops")
+        .select("id, route_id, address, stop_order", { head: true, count: "exact" })
         .limit(1),
     },
   ];
@@ -1035,6 +1072,125 @@ async function refreshVehicleCurrentKmByPlate(plate) {
   return updateVehicleCurrentKm(vehicle.id, nextCurrentKm);
 }
 
+async function listAllRoutes() {
+  if (storageMode === "supabase") {
+    return listSupabaseRows(() => (
+      supabase.from("routes").select("*").order("created_at", { ascending: false })
+    ));
+  }
+
+  return [...localRoutes].sort((left, right) => new Date(right.created_at) - new Date(left.created_at));
+}
+
+async function listAllRouteStops() {
+  if (storageMode === "supabase") {
+    return listSupabaseRows(() => (
+      supabase.from("route_stops").select("*").order("stop_order", { ascending: true })
+    ));
+  }
+
+  return [...localRouteStops].sort((left, right) => left.stop_order - right.stop_order);
+}
+
+async function getRouteById(routeId) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("routes")
+        .select("*")
+        .eq("id", routeId)
+        .maybeSingle()
+    );
+  }
+
+  return localRoutes.find((route) => isSameEntityId(route.id, routeId)) || null;
+}
+
+async function listRouteStopsForRoute(routeId) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("route_stops")
+        .select("*")
+        .eq("route_id", routeId)
+        .order("stop_order", { ascending: true })
+    );
+  }
+
+  return localRouteStops
+    .filter((stop) => isSameEntityId(stop.route_id, routeId))
+    .sort((left, right) => left.stop_order - right.stop_order);
+}
+
+async function insertRoute(city, name) {
+  const payload = {
+    city: String(city).trim(),
+    name: String(name).trim(),
+  };
+
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("routes")
+        .insert(payload)
+        .select("*")
+        .single()
+    );
+  }
+
+  const route = {
+    id: localRouteSequence++,
+    ...payload,
+    created_at: new Date().toISOString(),
+  };
+  localRoutes.push(route);
+  return route;
+}
+
+async function insertRouteStops(routeId, addresses) {
+  const payloads = addresses.map((address, index) => ({
+    route_id: routeId,
+    address: String(address).trim(),
+    stop_order: index,
+  }));
+
+  if (!payloads.length) {
+    return [];
+  }
+
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("route_stops")
+        .insert(payloads)
+        .select("*")
+    );
+  }
+
+  const stops = payloads.map((payload) => ({
+    id: localRouteStopSequence++,
+    ...payload,
+    created_at: new Date().toISOString(),
+  }));
+  localRouteStops.push(...stops);
+  return stops;
+}
+
+async function deleteRoute(routeId) {
+  if (storageMode === "supabase") {
+    const { error } = await supabase.from("routes").delete().eq("id", routeId);
+    if (error) {
+      throw error;
+    }
+    return true;
+  }
+
+  const before = localRoutes.length;
+  localRoutes = localRoutes.filter((route) => !isSameEntityId(route.id, routeId));
+  localRouteStops = localRouteStops.filter((stop) => !isSameEntityId(stop.route_id, routeId));
+  return localRoutes.length !== before;
+}
+
 async function insertVehicleTransfer(payload) {
   if (storageMode === "supabase") {
     return runQuery(
@@ -1545,10 +1701,14 @@ function resetInMemoryState() {
   localRecords = [];
   localVehicles = [];
   localVehicleTransfers = [];
+  localRoutes = [];
+  localRouteStops = [];
   localUserSequence = 1;
   localRecordSequence = 1;
   localVehicleSequence = 1;
   localVehicleTransferSequence = 1;
+  localRouteSequence = 1;
+  localRouteStopSequence = 1;
   initializationPromise = null;
 }
 
@@ -1656,6 +1816,102 @@ app.delete("/api/admin/vehicles/:vehicleId", requireAdmin, asyncRoute(async (req
   }
 
   await deleteVehicle(vehicle.id);
+  return res.json({ ok: true });
+}));
+
+function normalizeCityKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+app.get("/api/admin/routes/cities", requireAdmin, asyncRoute(async (_req, res) => {
+  const routes = await listAllRoutes();
+  const countsByCity = new Map();
+
+  for (const route of routes) {
+    const city = String(route.city || "").trim();
+    if (!city) {
+      continue;
+    }
+
+    const key = normalizeCityKey(city);
+    const current = countsByCity.get(key) || { city, routeCount: 0 };
+    current.routeCount += 1;
+    countsByCity.set(key, current);
+  }
+
+  const cities = [...countsByCity.values()].sort((left, right) => (
+    left.city.localeCompare(right.city, "pt-BR")
+  ));
+
+  return res.json({ cities });
+}));
+
+app.get("/api/admin/routes", requireAdmin, asyncRoute(async (req, res) => {
+  const city = String(req.query.city || "").trim();
+  if (!city) {
+    return res.status(400).json({ error: "Informe a cidade para buscar as rotas." });
+  }
+
+  const cityKey = normalizeCityKey(city);
+  const [allRoutes, allStops] = await Promise.all([listAllRoutes(), listAllRouteStops()]);
+  const cityRoutes = allRoutes.filter((route) => normalizeCityKey(route.city) === cityKey);
+  const stopCountByRoute = new Map();
+
+  for (const stop of allStops) {
+    const key = String(stop.route_id);
+    stopCountByRoute.set(key, (stopCountByRoute.get(key) || 0) + 1);
+  }
+
+  const routes = cityRoutes.map((route) => ({
+    ...serializeRoute(route),
+    stopCount: stopCountByRoute.get(String(route.id)) || 0,
+  }));
+
+  return res.json({ city, routes });
+}));
+
+app.get("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) => {
+  const route = await getRouteById(req.params.routeId);
+  if (!route) {
+    return res.status(404).json({ error: "Rota nao encontrada." });
+  }
+
+  const stops = await listRouteStopsForRoute(route.id);
+  return res.json({ route: serializeRoute(route, stops) });
+}));
+
+app.post("/api/admin/routes", requireAdmin, asyncRoute(async (req, res) => {
+  const { city, name, addresses } = req.body || {};
+  const normalizedCity = String(city || "").trim();
+  const normalizedName = String(name || "").trim();
+  const normalizedAddresses = Array.isArray(addresses)
+    ? addresses.map((address) => String(address || "").trim()).filter(Boolean)
+    : [];
+
+  if (!normalizedCity) {
+    return res.status(400).json({ error: "Informe a cidade da rota." });
+  }
+
+  if (!normalizedName) {
+    return res.status(400).json({ error: "Informe um nome para a rota." });
+  }
+
+  if (!normalizedAddresses.length) {
+    return res.status(400).json({ error: "Informe ao menos um endereco para a rota." });
+  }
+
+  const route = await insertRoute(normalizedCity, normalizedName);
+  const stops = await insertRouteStops(route.id, normalizedAddresses);
+  return res.status(201).json({ route: serializeRoute(route, stops) });
+}));
+
+app.delete("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) => {
+  const route = await getRouteById(req.params.routeId);
+  if (!route) {
+    return res.status(404).json({ error: "Rota nao encontrada." });
+  }
+
+  await deleteRoute(route.id);
   return res.json({ ok: true });
 }));
 

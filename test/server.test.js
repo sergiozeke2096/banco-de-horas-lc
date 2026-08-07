@@ -1874,3 +1874,145 @@ test("resumo semanal usa carga horaria de 9:18 para a matricula 2", async () => 
   assert.equal(response.status, 200);
   assert.equal(response.body.dailyWorkloadMinutes, 558);
 });
+
+test("admin cadastra rota, busca por cidade e ve os enderecos", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+
+  const createResponse = await adminAgent.post("/api/admin/routes").send({
+    city: "Joinville",
+    name: "Joinville - 06/08/2026",
+    addresses: ["Rua A, 100 - Centro", "Rua B, 200 - America", "Rua C, 300 - Bucarein"],
+  });
+  assert.equal(createResponse.status, 201);
+  assert.equal(createResponse.body.route.city, "Joinville");
+  assert.equal(createResponse.body.route.stopCount, 3);
+  assert.equal(createResponse.body.route.stops.length, 3);
+  assert.equal(createResponse.body.route.stops[0].address, "Rua A, 100 - Centro");
+  assert.equal(createResponse.body.route.stops[0].order, 0);
+
+  const citiesResponse = await adminAgent.get("/api/admin/routes/cities");
+  assert.equal(citiesResponse.status, 200);
+  assert.deepEqual(citiesResponse.body.cities, [{ city: "Joinville", routeCount: 1 }]);
+
+  const searchResponse = await adminAgent.get("/api/admin/routes").query({ city: "joinville" });
+  assert.equal(searchResponse.status, 200);
+  assert.equal(searchResponse.body.routes.length, 1);
+  assert.equal(searchResponse.body.routes[0].stopCount, 3);
+
+  const routeId = searchResponse.body.routes[0].id;
+  const detailResponse = await adminAgent.get(`/api/admin/routes/${routeId}`);
+  assert.equal(detailResponse.status, 200);
+  assert.equal(detailResponse.body.route.stops.length, 3);
+  assert.deepEqual(
+    detailResponse.body.route.stops.map((stop) => stop.address),
+    ["Rua A, 100 - Centro", "Rua B, 200 - America", "Rua C, 300 - Bucarein"]
+  );
+});
+
+test("busca de rotas separa cidades diferentes e aceita varias rotas na mesma cidade", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+
+  await adminAgent.post("/api/admin/routes").send({
+    city: "Brusque",
+    name: "Brusque - manha",
+    addresses: ["Rua X, 10"],
+  });
+  await adminAgent.post("/api/admin/routes").send({
+    city: "Brusque",
+    name: "Brusque - tarde",
+    addresses: ["Rua Y, 20", "Rua Z, 30"],
+  });
+  await adminAgent.post("/api/admin/routes").send({
+    city: "Blumenau",
+    name: "Blumenau - unica",
+    addresses: ["Rua W, 40"],
+  });
+
+  const brusqueResponse = await adminAgent.get("/api/admin/routes").query({ city: "Brusque" });
+  assert.equal(brusqueResponse.status, 200);
+  assert.equal(brusqueResponse.body.routes.length, 2);
+  assert.ok(brusqueResponse.body.routes.every((route) => route.city === "Brusque"));
+
+  const blumenauResponse = await adminAgent.get("/api/admin/routes").query({ city: "Blumenau" });
+  assert.equal(blumenauResponse.status, 200);
+  assert.equal(blumenauResponse.body.routes.length, 1);
+});
+
+test("busca de rota exige cidade e cidade sem rota devolve lista vazia", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+
+  const missingCityResponse = await adminAgent.get("/api/admin/routes");
+  assert.equal(missingCityResponse.status, 400);
+
+  const emptyResponse = await adminAgent.get("/api/admin/routes").query({ city: "Cidade Inexistente 12345" });
+  assert.equal(emptyResponse.status, 200);
+  assert.deepEqual(emptyResponse.body.routes, []);
+});
+
+test("cadastro de rota valida cidade, nome e enderecos obrigatorios", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+
+  assert.equal((await adminAgent.post("/api/admin/routes").send({
+    name: "Sem cidade",
+    addresses: ["Rua A"],
+  })).status, 400);
+
+  assert.equal((await adminAgent.post("/api/admin/routes").send({
+    city: "Itajai",
+    addresses: ["Rua A"],
+  })).status, 400);
+
+  assert.equal((await adminAgent.post("/api/admin/routes").send({
+    city: "Itajai",
+    name: "Sem enderecos",
+    addresses: [],
+  })).status, 400);
+
+  assert.equal((await adminAgent.post("/api/admin/routes").send({
+    city: "Itajai",
+    name: "So linhas vazias",
+    addresses: ["   ", ""],
+  })).status, 400);
+});
+
+test("admin exclui rota e ela some da busca por cidade", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+
+  const createResponse = await adminAgent.post("/api/admin/routes").send({
+    city: "Gaspar",
+    name: "Gaspar - unica",
+    addresses: ["Rua A, 1"],
+  });
+  const routeId = createResponse.body.route.id;
+
+  const deleteResponse = await adminAgent.delete(`/api/admin/routes/${routeId}`);
+  assert.equal(deleteResponse.status, 200);
+
+  const searchResponse = await adminAgent.get("/api/admin/routes").query({ city: "Gaspar" });
+  assert.deepEqual(searchResponse.body.routes, []);
+
+  const detailResponse = await adminAgent.get(`/api/admin/routes/${routeId}`);
+  assert.equal(detailResponse.status, 404);
+});
+
+test("funcionario nao consegue acessar rotas administrativas", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  await registerEmployee(adminAgent, "9901", "Sem acesso a rotas");
+
+  const employeeAgent = request.agent(app);
+  await login(employeeAgent, "9901", "senha-funcionario");
+
+  assert.equal((await employeeAgent.get("/api/admin/routes/cities")).status, 403);
+  assert.equal((await employeeAgent.get("/api/admin/routes").query({ city: "Joinville" })).status, 403);
+  assert.equal((await employeeAgent.post("/api/admin/routes").send({
+    city: "Joinville",
+    name: "Tentativa",
+    addresses: ["Rua A"],
+  })).status, 403);
+});

@@ -265,12 +265,23 @@ label {
   font-weight: 600;
 }
 
-input {
+input,
+textarea {
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 14px 16px;
   min-height: 50px;
   background: rgba(255, 255, 255, 0.95);
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.route-addresses-input {
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 0.88rem;
 }
 
 select {
@@ -281,7 +292,8 @@ select {
   background: rgba(255, 255, 255, 0.95);
 }
 
-input:focus {
+input:focus,
+textarea:focus {
   outline: 2px solid rgba(25, 107, 82, 0.18);
   border-color: var(--green);
 }
@@ -834,6 +846,74 @@ button:disabled,
   margin-bottom: 16px;
 }
 
+.routes-results {
+  display: grid;
+  gap: 12px;
+}
+
+.route-card {
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+}
+
+.route-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.route-name {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.route-meta {
+  margin: 2px 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.route-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.route-stops {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.route-stop-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--line);
+}
+
+.route-stop-index {
+  min-width: 22px;
+  font-weight: 800;
+  color: var(--blue);
+  font-variant-numeric: tabular-nums;
+}
+
+.route-stop-address {
+  overflow-wrap: anywhere;
+}
+
 .employees-table {
   min-width: 680px;
 }
@@ -1380,9 +1460,14 @@ th {
   .update-banner,
   .record-card,
   .admin-block-head,
-  .employee-editor-head {
+  .employee-editor-head,
+  .route-card-head {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .route-card-actions {
+    justify-content: flex-end;
   }
 
   .export-actions {

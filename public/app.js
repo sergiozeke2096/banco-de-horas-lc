@@ -14,6 +14,12 @@ const state = {
   alertCounts: null,
   weekSummary: null,
   adminTab: "overview",
+  showRouteRegisterForm: false,
+  routeCities: [],
+  routeSearchCity: "",
+  routeResults: [],
+  routeStopsById: {},
+  expandedRouteIds: [],
   summaryCollapsed: false,
   aggregatesCollapsed: false,
   alertsCollapsed: false,
@@ -91,7 +97,19 @@ const adminTabs = document.querySelector("#adminTabs");
 const adminTabButtons = [...document.querySelectorAll(".admin-tab")];
 const adminTabOverview = document.querySelector("#adminTabOverview");
 const adminTabCadastros = document.querySelector("#adminTabCadastros");
+const adminTabRotas = document.querySelector("#adminTabRotas");
 const adminOverviewDot = document.querySelector("#adminOverviewDot");
+const toggleRouteRegisterButton = document.querySelector("#toggleRouteRegisterButton");
+const routeRegisterForm = document.querySelector("#routeRegisterForm");
+const registerRouteCity = document.querySelector("#registerRouteCity");
+const registerRouteName = document.querySelector("#registerRouteName");
+const registerRouteAddresses = document.querySelector("#registerRouteAddresses");
+const routeManagerMessage = document.querySelector("#routeManagerMessage");
+const routeCitySearchInput = document.querySelector("#routeCitySearchInput");
+const routeCitySuggestions = document.querySelector("#routeCitySuggestions");
+const searchRoutesButton = document.querySelector("#searchRoutesButton");
+const clearRouteSearchButton = document.querySelector("#clearRouteSearchButton");
+const routesResults = document.querySelector("#routesResults");
 const recordsSection = document.querySelector("#recordsSection");
 const alertsPanel = document.querySelector("#alertsPanel");
 const alertsTitle = document.querySelector("#alertsTitle");
@@ -1603,10 +1621,11 @@ function handleToggleAggregates() {
   renderSummaryAggregates();
 }
 
-// O painel do admin virou 3 abas (Visao geral / Registros / Cadastros) para nao
-// obrigar rolagem longa toda vez que o admin so quer ver pendencias. A secao de
-// Registros e compartilhada com a tela do funcionario, entao ela fica fora do
-// #adminPanel no DOM e e apenas escondida/mostrada aqui conforme a aba ativa.
+// O painel do admin virou 4 abas (Visao geral / Registros / Cadastros / Rotas)
+// para nao obrigar rolagem longa toda vez que o admin so quer ver pendencias.
+// A secao de Registros e compartilhada com a tela do funcionario, entao ela
+// fica fora do #adminPanel no DOM e e apenas escondida/mostrada aqui conforme
+// a aba ativa.
 function renderAdminTabs() {
   const isAdmin = state.user?.role === "admin";
   if (adminTabs) {
@@ -1624,6 +1643,7 @@ function renderAdminTabs() {
 
   adminTabOverview?.classList.toggle("hidden", state.adminTab !== "overview");
   adminTabCadastros?.classList.toggle("hidden", state.adminTab !== "cadastros");
+  adminTabRotas?.classList.toggle("hidden", state.adminTab !== "rotas");
   recordsSection?.classList.toggle("hidden", state.adminTab !== "registros");
 
   if (adminOverviewDot) {
@@ -1639,6 +1659,223 @@ function handleAdminTabClick(event) {
 
   state.adminTab = button.dataset.adminTab;
   renderAdminTabs();
+}
+
+function setRouteManagerMessage(message, isError = false) {
+  if (!routeManagerMessage) {
+    return;
+  }
+
+  routeManagerMessage.textContent = message;
+  routeManagerMessage.style.color = isError ? "#a33f33" : "";
+}
+
+function renderRouteRegisterForm() {
+  if (!routeRegisterForm || !toggleRouteRegisterButton) {
+    return;
+  }
+
+  routeRegisterForm.classList.toggle("hidden", !state.showRouteRegisterForm);
+  toggleRouteRegisterButton.textContent = state.showRouteRegisterForm ? "Cancelar" : "Nova rota";
+}
+
+function handleToggleRouteRegisterForm() {
+  if (state.user?.role !== "admin") {
+    return;
+  }
+
+  state.showRouteRegisterForm = !state.showRouteRegisterForm;
+  renderRouteRegisterForm();
+}
+
+function renderRouteCitySuggestions() {
+  if (!routeCitySuggestions) {
+    return;
+  }
+
+  routeCitySuggestions.innerHTML = "";
+  for (const entry of state.routeCities) {
+    const option = document.createElement("option");
+    option.value = entry.city;
+    option.textContent = `${entry.city} (${entry.routeCount})`;
+    routeCitySuggestions.appendChild(option);
+  }
+}
+
+async function loadRouteCities() {
+  if (state.user?.role !== "admin") {
+    state.routeCities = [];
+    renderRouteCitySuggestions();
+    return;
+  }
+
+  const data = await api("/api/admin/routes/cities");
+  state.routeCities = data.cities || [];
+  renderRouteCitySuggestions();
+}
+
+async function handleRouteRegister(event) {
+  event.preventDefault();
+
+  const addresses = registerRouteAddresses.value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const payload = {
+    city: registerRouteCity.value.trim(),
+    name: registerRouteName.value.trim(),
+    addresses,
+  };
+
+  try {
+    const data = await api("/api/admin/routes", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    routeRegisterForm.reset();
+    setRouteManagerMessage(`Rota "${data.route.name}" cadastrada com ${data.route.stopCount} endereco(s).`);
+    state.showRouteRegisterForm = false;
+    renderRouteRegisterForm();
+    await loadRouteCities();
+    // Se a busca atual ja esta na mesma cidade da rota recem-criada, atualiza
+    // a lista na hora para a rota nova aparecer sem precisar buscar de novo.
+    if (state.routeSearchCity && normalizeSearchValue(state.routeSearchCity) === normalizeSearchValue(payload.city)) {
+      await handleSearchRoutes();
+    }
+  } catch (error) {
+    setRouteManagerMessage(error.message, true);
+  }
+}
+
+function renderRoutesResults() {
+  if (!routesResults) {
+    return;
+  }
+
+  if (!state.routeSearchCity) {
+    routesResults.innerHTML = '<p class="muted">Busque uma cidade para ver as rotas cadastradas.</p>';
+    return;
+  }
+
+  if (!state.routeResults.length) {
+    routesResults.innerHTML = `<p class="muted">Nenhuma rota cadastrada para ${escapeHtml(state.routeSearchCity)}.</p>`;
+    return;
+  }
+
+  routesResults.innerHTML = state.routeResults
+    .map((route) => {
+      const key = String(route.id);
+      const isExpanded = state.expandedRouteIds.includes(key);
+      const stops = state.routeStopsById[key];
+      const stopsHtml = isExpanded
+        ? stops
+          ? `<ol class="route-stops">${stops
+              .map((stop, index) => `
+                <li class="route-stop-item">
+                  <span class="route-stop-index">${index + 1}.</span>
+                  <span class="route-stop-address">${escapeHtml(stop.address)}</span>
+                </li>
+              `)
+              .join("")}</ol>`
+          : '<p class="muted">Carregando enderecos...</p>'
+        : "";
+
+      return `
+        <article class="route-card">
+          <div class="route-card-head">
+            <div>
+              <h4 class="route-name">${escapeHtml(route.name)}</h4>
+              <p class="route-meta">${escapeHtml(route.city)} - ${route.stopCount} endereco${route.stopCount === 1 ? "" : "s"} - ${escapeHtml(formatCreatedAt(route.createdAt))}</p>
+            </div>
+            <div class="route-card-actions">
+              <button type="button" class="ghost table-action" data-toggle-route="${route.id}">${isExpanded ? "Ocultar" : "Ver enderecos"}</button>
+              <button type="button" class="ghost table-action" data-delete-route="${route.id}">Excluir</button>
+            </div>
+          </div>
+          ${stopsHtml}
+        </article>
+      `;
+    })
+    .join("");
+}
+
+async function handleSearchRoutes() {
+  const city = routeCitySearchInput.value.trim();
+  if (!city) {
+    setRouteManagerMessage("Digite uma cidade para buscar.", true);
+    return;
+  }
+
+  try {
+    const data = await api(`/api/admin/routes${buildQueryString({ city })}`);
+    state.routeSearchCity = data.city;
+    state.routeResults = data.routes || [];
+    state.expandedRouteIds = [];
+    setRouteManagerMessage("");
+    renderRoutesResults();
+  } catch (error) {
+    setRouteManagerMessage(error.message, true);
+  }
+}
+
+function handleClearRouteSearch() {
+  routeCitySearchInput.value = "";
+  state.routeSearchCity = "";
+  state.routeResults = [];
+  state.expandedRouteIds = [];
+  setRouteManagerMessage("");
+  renderRoutesResults();
+}
+
+async function handleRoutesResultsClick(event) {
+  const toggleButton = event.target.closest("[data-toggle-route]");
+  if (toggleButton) {
+    const key = String(toggleButton.dataset.toggleRoute);
+    if (state.expandedRouteIds.includes(key)) {
+      state.expandedRouteIds = state.expandedRouteIds.filter((id) => id !== key);
+      renderRoutesResults();
+      return;
+    }
+
+    state.expandedRouteIds = [...state.expandedRouteIds, key];
+    renderRoutesResults();
+
+    if (!state.routeStopsById[key]) {
+      try {
+        const data = await api(`/api/admin/routes/${key}`);
+        state.routeStopsById[key] = data.route.stops || [];
+        renderRoutesResults();
+      } catch (error) {
+        setRouteManagerMessage(error.message, true);
+      }
+    }
+    return;
+  }
+
+  const deleteButton = event.target.closest("[data-delete-route]");
+  if (deleteButton) {
+    const routeId = deleteButton.dataset.deleteRoute;
+    const route = state.routeResults.find((item) => String(item.id) === String(routeId));
+    if (!route) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Excluir a rota "${route.name}"?`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await api(`/api/admin/routes/${routeId}`, { method: "DELETE" });
+      setRouteManagerMessage(`Rota "${route.name}" excluida com sucesso.`);
+      delete state.routeStopsById[String(routeId)];
+      await loadRouteCities();
+      await handleSearchRoutes();
+    } catch (error) {
+      setRouteManagerMessage(error.message, true);
+    }
+  }
 }
 
 function renderSession() {
@@ -1678,6 +1915,8 @@ function renderSession() {
   renderSummary();
   renderSummaryAggregates();
   renderAlerts();
+  renderRouteRegisterForm();
+  renderRoutesResults();
   renderAdminTabs();
 }
 
@@ -1718,6 +1957,7 @@ async function loadSession() {
     if (state.user.role === "admin") {
       await loadEmployees();
       await loadAdminInsights();
+      await loadRouteCities();
     } else {
       await loadVehicleContext();
       await loadWeekSummary();
@@ -2043,6 +2283,15 @@ async function handleLogout() {
   state.vehicleManageSearch = "";
   state.vehicleManageSearchApplied = "";
   state.adminTab = "overview";
+  state.showRouteRegisterForm = false;
+  state.routeCities = [];
+  state.routeSearchCity = "";
+  state.routeResults = [];
+  state.routeStopsById = {};
+  state.expandedRouteIds = [];
+  if (routeCitySearchInput) {
+    routeCitySearchInput.value = "";
+  }
   state.adminFilters = {
     employeeId: "",
     vehiclePlate: "",
@@ -3087,6 +3336,11 @@ bindEvent(changeVehicleButton, "click", handleChangeVehicle);
 bindEvent(vehicleForm, "submit", handleVehicleSubmit);
 bindEvent(vehicleSelectInput, "change", syncSelectedVehicleKm);
 bindEvent(vehicleCancelButton, "click", handleVehicleCancel);
+bindEvent(toggleRouteRegisterButton, "click", handleToggleRouteRegisterForm);
+bindEvent(routeRegisterForm, "submit", handleRouteRegister);
+bindEvent(searchRoutesButton, "click", handleSearchRoutes);
+bindEvent(clearRouteSearchButton, "click", handleClearRouteSearch);
+bindEvent(routesResults, "click", handleRoutesResultsClick);
 bindEvent(vehicleDialog, "cancel", handleVehicleCancel);
 bindEvent(vehicleDialog, "close", handleVehicleDialogClose);
 bindEvent(vehicleTransferForm, "submit", handleVehicleTransferSubmit);

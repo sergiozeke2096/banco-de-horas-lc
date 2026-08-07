@@ -230,6 +230,25 @@ Trabalho feito **apenas localmente** ainda, sem publicar na VPS. Sao mudancas so
 - `pointer-events:none` garante que a marca nunca bloqueia clique em botao/campo, em nenhum dos dois z-index testados.
 - `npm test` segue `67/67` (mudanca so de CSS).
 
+## Nova funcionalidade: Rotas por cidade em 06/08/2026 (somente admin)
+
+- O usuario pediu uma 4a aba no painel do admin ("Rotas") para organizar rotas de entrega. Ele vai mandar fotos/PDFs com enderecos e cidades; cada PDF vira uma rota.
+- Decisoes fechadas com o usuario antes de implementar:
+  - **Uma cidade pode ter varias rotas** (cada PDF novo cria uma rota nova com nome proprio; nada substitui rota antiga automaticamente).
+  - **Endereco e so texto livre** por enquanto (sem campos separados de destinatario/telefone/observacao — pode evoluir depois se pedirem).
+- Schema novo em [supabase/schema.sql](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/supabase/schema.sql): tabelas `routes` (id, city, name, created_at) e `route_stops` (id, route_id, address, stop_order, created_at), com indices por cidade e por rota. **Ainda nao rodado na VPS** — precisa executar o schema atualizado no Supabase antes do proximo deploy, senao o backend vai falhar a validacao de schema no boot.
+- Backend em [server.js](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/server.js) (tudo `requireAdmin`):
+  - `GET /api/admin/routes/cities` — cidades com pelo menos uma rota, com contagem, para a busca com sugestao.
+  - `GET /api/admin/routes?city=X` — rotas daquela cidade (nome, quantidade de enderecos, data). 400 se a cidade nao for informada.
+  - `GET /api/admin/routes/:routeId` — detalhe de uma rota com os enderecos ordenados.
+  - `POST /api/admin/routes` — cria rota + enderecos numa tacada (`{ city, name, addresses: [] }`).
+  - `DELETE /api/admin/routes/:routeId` — remove a rota e os enderecos dela.
+  - Segue o mesmo padrao dual-mode (Supabase / memoria local) do resto do arquivo — `localRoutes`/`localRouteStops` resetados em `resetInMemoryState`.
+- Frontend: 4a aba "Rotas" dentro de `#adminPanel` em [public/index.html](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/public/index.html), com formulario de cadastro (cidade, nome da rota, textarea de enderecos um por linha — pensado para colar direto do que vier do PDF/print) e busca por cidade com sugestao automatica (datalist). Cada rota encontrada vira um card com "Ver enderecos" (carrega sob demanda e cacheia em `state.routeStopsById`) e "Excluir" (com confirmacao).
+- `.route-card-head` entra na regra responsiva que empilha cabecalhos em telas estreitas (nome da rota longo nao espreme mais os botoes de acao no celular).
+- 6 testes novos de integracao (cadastro+busca+detalhe, multiplas rotas por cidade, validacao de cidade obrigatoria e cidade sem rota, validacao de campos obrigatorios no cadastro, exclusao, bloqueio para funcionario). Suite: `73/73`.
+- Validado end-to-end no navegador local (mobile e desktop): cadastro de 2 rotas em cidades diferentes, busca isolando por cidade, expansao de enderecos numerados, exclusao removendo a rota da busca e da lista de sugestao de cidades.
+
 ## Validacoes locais recentes
 
 - `npm test` passou com `63/63` em `05/08/2026` apos a automacao de pendencias (`16` testes novos de regra + `3` de endpoint).
@@ -253,7 +272,8 @@ Trabalho feito **apenas localmente** ainda, sem publicar na VPS. Sao mudancas so
 
 ## Pendencia atual
 
-- A automacao de pendencias, o novo layout da tela do funcionario e o destaque da logo estao prontos e testados localmente, mas ainda **nao** foram publicados na VPS nem entraram em APK novo. Falta o usuario pedir o deploy.
+- A automacao de pendencias, o novo layout da tela do funcionario, o destaque da logo e a funcionalidade de Rotas estao prontos e testados localmente, mas ainda **nao** foram publicados na VPS nem entraram em APK novo. Falta o usuario pedir o deploy.
+- **Atencao especial para o deploy da funcionalidade de Rotas**: alem do deploy normal do app, e preciso rodar o `supabase/schema.sql` atualizado no projeto Supabase da VPS antes (ou junto) de subir o codigo novo, porque ele cria as tabelas `routes` e `route_stops`. Sem isso o backend vai recusar iniciar (`validateSupabaseSchema` falha).
 - Nada mais pendente de publicar no momento. Tudo do dia `05/08/2026` (fila offline, dashboard, release assinado `1.1.7`, auto-update silencioso, cache offline de leitura) esta em producao e o `latest.json` ja aponta pro `1.1.7`.
 - Recomendado testar manualmente em navegador/APK real o auto-update silencioso e o cache offline de leitura quando der oportunidade (so foi validado por teste automatizado + checagem estatica ate agora, sem navegador real neste ambiente).
 

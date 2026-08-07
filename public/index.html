@@ -132,6 +132,7 @@
           </button>
           <button type="button" class="admin-tab" data-admin-tab="registros">Registros</button>
           <button type="button" class="admin-tab" data-admin-tab="cadastros">Cadastros</button>
+          <button type="button" class="admin-tab" data-admin-tab="rotas">Rotas</button>
         </div>
 
         <div id="adminTabOverview">
@@ -359,6 +360,47 @@
             </section>
           </article>
         </div>
+        </div>
+
+        <div class="hidden" id="adminTabRotas">
+          <article class="admin-block">
+            <div class="admin-block-head">
+              <div>
+                <h4>Cadastrar rota</h4>
+              </div>
+              <button type="button" class="secondary" id="toggleRouteRegisterButton">Nova rota</button>
+            </div>
+            <form id="routeRegisterForm" class="stack hidden">
+              <label>
+                Cidade
+                <input id="registerRouteCity" type="text" placeholder="Ex.: Joinville" required>
+              </label>
+              <label>
+                Nome da rota
+                <input id="registerRouteName" type="text" placeholder="Ex.: Joinville - 06/08/2026" required>
+              </label>
+              <label>
+                Enderecos (um por linha)
+                <textarea id="registerRouteAddresses" class="route-addresses-input" rows="8" placeholder="Rua Exemplo, 123 - Bairro&#10;Rua Outra, 456 - Bairro" required></textarea>
+              </label>
+              <button type="submit" class="secondary">Salvar rota</button>
+            </form>
+            <p class="feedback manager-feedback" id="routeManagerMessage"></p>
+            <div class="admin-search-panel">
+              <label class="filter-label" for="routeCitySearchInput">
+                Buscar rotas por cidade
+                <input id="routeCitySearchInput" type="text" list="routeCitySuggestions" placeholder="Ex.: Joinville ou Brusque">
+              </label>
+              <datalist id="routeCitySuggestions"></datalist>
+              <div class="filter-actions">
+                <button type="button" class="secondary" id="searchRoutesButton">Buscar rotas</button>
+                <button type="button" class="ghost" id="clearRouteSearchButton">Limpar busca</button>
+              </div>
+            </div>
+            <div class="routes-results" id="routesResults">
+              <p class="muted">Busque uma cidade para ver as rotas cadastradas.</p>
+            </div>
+          </article>
         </div>
       </section>
 
