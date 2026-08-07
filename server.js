@@ -5,7 +5,7 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const path = require("path");
 const { createClient } = require("@supabase/supabase-js");
-const { computeSummary, aggregateSummaryByEmployee, createWorkbook } = require("./lib/timecard-workbook");
+const { computeSummary, aggregateSummaryByEmployee, createWorkbook, getDailyWorkloadMinutes } = require("./lib/timecard-workbook");
 const { detectPendingAlerts, summarizeAlerts, DEFAULT_ALERT_THRESHOLDS } = require("./lib/pending-alerts");
 
 const LEGACY_ADMIN_NAME = "Lc tranporte";
@@ -1842,6 +1842,37 @@ app.get("/api/me/vehicle-context", requireAuth, asyncRoute(async (req, res) => {
 
   const context = await buildVehicleContextForUser(req.authUser.id);
   return res.json({ context: serializeVehicleContext(context) });
+}));
+
+const EMPLOYEE_WEEK_SUMMARY_DAYS = 7;
+
+app.get("/api/me/summary", requireAuth, asyncRoute(async (req, res) => {
+  if (req.authUser.role !== "employee") {
+    return res.json({ daysWorked: 0, workedHours: "00:00", overtimeHours: "00:00", windowDays: EMPLOYEE_WEEK_SUMMARY_DAYS });
+  }
+
+  const todayStart = parseLocalDate(localDateFormatter.format(new Date()));
+  const fromDate = new Date(todayStart.getTime() - (EMPLOYEE_WEEK_SUMMARY_DAYS - 1) * 24 * 60 * 60 * 1000);
+  const isWithinWeek = (row) => {
+    const rowDate = parseLocalDate(row.local_date) || new Date(row.recorded_at);
+    return rowDate.getTime() >= fromDate.getTime() && rowDate.getTime() <= todayStart.getTime();
+  };
+
+  const records = (await listUserRecordsAscending(req.authUser.id)).filter(isWithinWeek);
+  const transfers = (await listUserVehicleTransfersAscending(req.authUser.id)).filter(isWithinWeek);
+
+  // Reaproveita o mesmo calculo de horas/carga horaria do resumo do admin
+  // para os numeros nunca divergirem entre a tela do funcionario e a do admin.
+  const { employees } = aggregateSummaryByEmployee(computeSummary(records, transfers));
+  const own = employees[0] || { daysWorked: 0, workedHours: "00:00", overtimeHours: "00:00" };
+
+  return res.json({
+    daysWorked: own.daysWorked,
+    workedHours: own.workedHours,
+    overtimeHours: own.overtimeHours,
+    windowDays: EMPLOYEE_WEEK_SUMMARY_DAYS,
+    dailyWorkloadMinutes: getDailyWorkloadMinutes(req.authUser.employeeId, req.authUser.name),
+  });
 }));
 
 app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {

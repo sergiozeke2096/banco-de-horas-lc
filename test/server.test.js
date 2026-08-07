@@ -1787,3 +1787,90 @@ test("pendencias respeitam o filtro de matricula", async () => {
   assert.ok(response.body.alerts.length > 0);
   assert.ok(response.body.alerts.every((alert) => alert.employeeId === "9704"));
 });
+
+const WEEK_SUMMARY_HOUR_MS = 60 * 60 * 1000;
+const weekSummaryLocalDateFormatter = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeZone: "America/Sao_Paulo" });
+const weekSummaryLocalTimeFormatter = new Intl.DateTimeFormat("pt-BR", { timeStyle: "medium", timeZone: "America/Sao_Paulo" });
+
+function hoursAgoPunchFields(hours) {
+  const date = new Date(Date.now() - hours * WEEK_SUMMARY_HOUR_MS);
+  return {
+    recordedAt: date.toISOString(),
+    localDate: weekSummaryLocalDateFormatter.format(date),
+    localTime: weekSummaryLocalTimeFormatter.format(date),
+  };
+}
+
+test("resumo semanal do funcionario comeca zerado sem registros", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  await registerEmployee(adminAgent, "9801", "Sem Registro");
+
+  const employeeAgent = request.agent(app);
+  await login(employeeAgent, "9801", "senha-funcionario");
+
+  const response = await employeeAgent.get("/api/me/summary");
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body, {
+    daysWorked: 0,
+    workedHours: "00:00",
+    overtimeHours: "00:00",
+    windowDays: 7,
+    dailyWorkloadMinutes: 480,
+  });
+});
+
+test("resumo semanal do funcionario soma jornada fechada de hoje e ignora registro fora da janela", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  await registerEmployee(adminAgent, "9802", "Semana Cheia");
+  await registerVehicle(adminAgent, "SEM9802", "Veiculo semana", 1000);
+
+  const employeeAgent = request.agent(app);
+  await login(employeeAgent, "9802", "senha-funcionario");
+
+  assert.equal((await employeeAgent.post("/api/me/records").send({
+    action: "Entrada",
+    ...hoursAgoPunchFields(8),
+    vehiclePlate: "SEM9802",
+    vehicleKm: 1000,
+    ...defaultLocation,
+  })).status, 201);
+  assert.equal((await employeeAgent.post("/api/me/records").send({
+    action: "Saida",
+    ...hoursAgoPunchFields(0.5),
+    vehiclePlate: "SEM9802",
+    vehicleKm: 1080,
+    ...defaultLocation,
+  })).status, 201);
+
+  const response = await employeeAgent.get("/api/me/summary");
+  assert.equal(response.status, 200);
+  assert.equal(response.body.daysWorked, 1);
+  assert.equal(response.body.workedHours, "07:30");
+  assert.equal(response.body.overtimeHours, "00:00");
+  assert.equal(response.body.dailyWorkloadMinutes, 480);
+});
+
+test("admin recebe resumo semanal zerado ao chamar /api/me/summary", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+
+  const response = await adminAgent.get("/api/me/summary");
+  assert.equal(response.status, 200);
+  assert.equal(response.body.daysWorked, 0);
+  assert.equal(response.body.workedHours, "00:00");
+});
+
+test("resumo semanal usa carga horaria de 9:18 para a matricula 2", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  await registerEmployee(adminAgent, "2");
+
+  const employeeAgent = request.agent(app);
+  await login(employeeAgent, "2", "senha-funcionario");
+
+  const response = await employeeAgent.get("/api/me/summary");
+  assert.equal(response.status, 200);
+  assert.equal(response.body.dailyWorkloadMinutes, 558);
+});

@@ -205,6 +205,17 @@ Trabalho feito **apenas localmente** ainda, sem publicar na VPS. Sao mudancas so
 - Validado em navegador local nos dois tamanhos; `npm test` 63/63.
 - **Combinado com o usuario em 06/08/2026: as mudancas vao se acumulando localmente nesta branch, e o deploy (VPS + APK) so acontece quando o usuario disser que esta tudo pronto para subir.** Nao subir nada por conta propria antes disso.
 
+## Resumo semanal e indicador de hora extra para o funcionario em 06/08/2026
+
+- O usuario achou a tela do funcionario simples demais e pediu mais informacao util. Escolheu duas das opcoes oferecidas: resumo da semana e indicador de hora extra do dia (descartou historico de dias anteriores e "manter simples").
+- Novo endpoint `GET /api/me/summary` (qualquer usuario autenticado; funcionario recebe dados reais, admin recebe zeros) em [server.js](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/server.js): soma os ultimos 7 dias corridos (`local_date`, fuso America/Sao_Paulo) do proprio funcionario, reaproveitando `computeSummary` + `aggregateSummaryByEmployee` de [lib/timecard-workbook.js](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/lib/timecard-workbook.js) — os mesmos que o admin usa, para os numeros nunca divergirem entre as duas telas. Retorna `daysWorked`, `workedHours`, `overtimeHours`, `windowDays` e `dailyWorkloadMinutes` (a carga horaria real do funcionario, incluindo a excecao de `9:18` da matricula `2`/Everton Ricardo).
+- `getDailyWorkloadMinutes` foi exportado de `lib/timecard-workbook.js` (antes so uso interno) para o endpoint poder devolver a carga horaria correta ao frontend.
+- Tela do funcionario ganhou:
+  - Tag "Hora extra" no card de jornada, comparando o tempo trabalhado hoje (calculado ao vivo no cliente) contra `dailyWorkloadMinutes` vindo do backend — nao usa mais 8h fixo, respeita a excecao por funcionario.
+  - Card "Essa semana" (dias, horas trabalhadas, horas extras) logo abaixo do card de jornada, carregado via `loadWeekSummary()`/`renderWeekSummary()` em [public/app.js](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/public/app.js). Atualiza apos cada registro de ponto e apos sincronizar a fila offline.
+- 4 testes novos de integracao para `/api/me/summary` (zerado sem registros, soma jornada fechada e ignora fora da janela de 7 dias, admin recebe zerado, carga horaria de 9:18 pra matricula 2). Suite: `67/67`.
+- **Nota operacional para sessoes futuras**: nesta sessao, um processo de teste local antigo (de uma conversa anterior) ficou vivo na porta `3111` sem ser encerrado corretamente e continuou respondendo com codigo desatualizado, causando um falso bug (`/api/me/summary` parecia nao existir). Antes de testar qualquer rota nova no servidor local, confirmar com `Get-NetTCPConnection -LocalPort 3111` que o processo respondendo e o que acabou de ser iniciado (comparar `StartTime` do processo com o horario atual), nao um processo esquecido de uma sessao anterior.
+
 ## Validacoes locais recentes
 
 - `npm test` passou com `63/63` em `05/08/2026` apos a automacao de pendencias (`16` testes novos de regra + `3` de endpoint).

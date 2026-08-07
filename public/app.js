@@ -12,6 +12,7 @@ const state = {
   offlineSnapshotCachedAt: "",
   alerts: [],
   alertCounts: null,
+  weekSummary: null,
   adminTab: "overview",
   summaryCollapsed: false,
   aggregatesCollapsed: false,
@@ -80,6 +81,11 @@ const journeyState = document.querySelector("#journeyState");
 const journeySince = document.querySelector("#journeySince");
 const journeyWorked = document.querySelector("#journeyWorked");
 const journeyBreak = document.querySelector("#journeyBreak");
+const journeyOvertimeTag = document.querySelector("#journeyOvertimeTag");
+const weekSummaryCard = document.querySelector("#weekSummaryCard");
+const weekSummaryDays = document.querySelector("#weekSummaryDays");
+const weekSummaryWorked = document.querySelector("#weekSummaryWorked");
+const weekSummaryOvertime = document.querySelector("#weekSummaryOvertime");
 const nextActionHint = document.querySelector("#nextActionHint");
 const adminTabs = document.querySelector("#adminTabs");
 const adminTabButtons = [...document.querySelectorAll(".admin-tab")];
@@ -782,6 +788,15 @@ function renderJourneyCard() {
   journeyState.textContent = JOURNEY_STATE_LABELS[journey.status];
   journeyWorked.textContent = formatElapsed(journey.workedMs);
   journeyBreak.textContent = formatElapsed(journey.breakMs);
+
+  if (journeyOvertimeTag) {
+    // Usa a carga horaria real do funcionario quando o backend ja informou
+    // (alguns funcionarios tem excecao, ex.: 9:18 em vez de 8h); 8h e so o
+    // valor padrao ate a primeira carga do resumo semanal chegar.
+    const dailyWorkloadMinutes = state.weekSummary?.dailyWorkloadMinutes ?? 480;
+    const isOvertime = journey.workedMs > dailyWorkloadMinutes * 60000;
+    journeyOvertimeTag.classList.toggle("hidden", !isOvertime);
+  }
 
   if (journeySince) {
     if (journey.status === "working" && journey.startedAt) {
@@ -1650,6 +1665,7 @@ function renderSession() {
   renderVehicles();
   renderEmployeeVehicleContext();
   renderJourneyCard();
+  renderWeekSummary();
   renderRecords();
   renderSummary();
   renderSummaryAggregates();
@@ -1696,6 +1712,7 @@ async function loadSession() {
       await loadAdminInsights();
     } else {
       await loadVehicleContext();
+      await loadWeekSummary();
     }
   }
 }
@@ -1786,6 +1803,37 @@ async function loadVehicleContext() {
   state.vehicleContext = data.context || null;
   renderEmployeeVehicleContext();
   persistOfflineSnapshot();
+}
+
+function renderWeekSummary() {
+  if (!weekSummaryCard || !weekSummaryDays || !weekSummaryWorked || !weekSummaryOvertime) {
+    return;
+  }
+
+  const isEmployee = state.user?.role === "employee";
+  weekSummaryCard.classList.toggle("hidden", !isEmployee);
+  if (!isEmployee || !state.weekSummary) {
+    return;
+  }
+
+  weekSummaryDays.textContent = String(state.weekSummary.daysWorked ?? 0);
+  weekSummaryWorked.textContent = state.weekSummary.workedHours || "00:00";
+  weekSummaryOvertime.textContent = state.weekSummary.overtimeHours || "00:00";
+  // A tag de hora extra do card de jornada depende da carga horaria vinda
+  // aqui, entao precisa recalcular assim que o resumo da semana chega.
+  renderJourneyCard();
+}
+
+async function loadWeekSummary() {
+  if (state.user?.role !== "employee") {
+    state.weekSummary = null;
+    renderWeekSummary();
+    return;
+  }
+
+  const data = await api("/api/me/summary");
+  state.weekSummary = data;
+  renderWeekSummary();
 }
 
 async function loadVehicles() {
@@ -1973,6 +2021,7 @@ async function handleLogout() {
   state.employees = [];
   state.vehicles = [];
   state.vehicleContext = null;
+  state.weekSummary = null;
   state.offlineSnapshotActive = false;
   state.offlineSnapshotCachedAt = "";
   clearOfflineSnapshot();
@@ -2852,6 +2901,7 @@ async function trySyncQueue() {
       await loadRecords().catch(() => {});
       await loadVehicles().catch(() => {});
       await loadVehicleContext().catch(() => {});
+      await loadWeekSummary().catch(() => {});
     }
   }
 }
@@ -2985,6 +3035,7 @@ async function registerPoint(action) {
     await loadRecords();
     await loadVehicles();
     await loadVehicleContext();
+    await loadWeekSummary();
   } catch (error) {
     if (error.isNetworkError) {
       enqueuePendingPunch(payload);
