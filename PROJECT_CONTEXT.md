@@ -249,6 +249,18 @@ Trabalho feito **apenas localmente** ainda, sem publicar na VPS. Sao mudancas so
 - 6 testes novos de integracao (cadastro+busca+detalhe, multiplas rotas por cidade, validacao de cidade obrigatoria e cidade sem rota, validacao de campos obrigatorios no cadastro, exclusao, bloqueio para funcionario). Suite: `73/73`.
 - Validado end-to-end no navegador local (mobile e desktop): cadastro de 2 rotas em cidades diferentes, busca isolando por cidade, expansao de enderecos numerados, exclusao removendo a rota da busca e da lista de sugestao de cidades.
 
+## Rotas: redesenho para dados reais em 07/08/2026 (endereco por parada, nao por rota)
+
+- O usuario mandou prints reais de planilhas de rota (colunas: Operacao, Motorista, Cidade de origem, Cliente, Endereco de coleta, Contato Cliente, Hora Chegada, Hora Fim). Ficou claro que **um mesmo PDF/rota mistura varias cidades** (ex.: uma rota do Leandro tem paradas em Blumenau e Benedito Novo na mesma folha) — isso invalidava o desenho anterior (`routes.city` fixo por rota).
+- Redesenho confirmado com o usuario antes de implementar: a cidade passou para o nivel da **parada** (`route_stops`), nao da rota. A rota (`routes`) representa o PDF inteiro e so tem `name`. Cada parada guarda `operation`, `city`, `client`, `address`, `contact`.
+- Busca por cidade agora devolve uma lista plana de **enderecos** (nao rotas inteiras) juntando todas as rotas que tiverem pelo menos uma parada naquela cidade — cada resultado mostra badge de operacao, cliente, cidade+endereco, contato e "Rota: <nome>" para rastrear de qual PDF veio.
+- `GET /api/admin/routes` sem `?city` agora lista todas as rotas cadastradas (para gerenciar/excluir); com `?city=X` devolve as paradas daquela cidade. `GET /api/admin/routes/cities` conta por cidade a partir das paradas, nao das rotas.
+- Cadastro na UI virou uma unica caixa de texto onde se cola direto do Excel/Google Sheets: uma parada por linha, campos separados por **Tab** (o que sai ao copiar celulas) ou por `|` (para digitar a mao) na ordem Operacao, Cidade, Cliente, Endereco, Contato. So Cidade e Endereco sao obrigatorios; o resto pode ficar em branco. `parseRouteStopsInput` em [public/app.js](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/public/app.js) faz esse parse no cliente.
+- Nova secao "Rotas cadastradas" (colapsavel, carregada sob demanda) para ver/excluir rotas inteiras (o PDF completo), separada da busca por cidade.
+- Schema do Supabase reescrito (o app ainda nao tinha sido deployado com a versao anterior de Rotas, entao foi troca direta, nao migracao aditiva): `routes` perdeu a coluna `city`; `route_stops` ganhou `operation`, `city` (not null), `client`, `contact`.
+- Testes de integracao reescritos para o novo contrato (6 testes, incluindo o caso real de uma rota com paradas em cidades diferentes e paradas invalidas sendo descartadas sem derrubar o cadastro). Suite: `73/73`.
+- Validado no navegador com dados reais das planilhas que o usuario mandou (Leandro - Blumenau/Benedito Novo, Leandro - Jaragua do Sul com uma parada em Schroeder misturada): cadastro via paste TSV, busca por Jaraguau do Sul trazendo so as 4 paradas certas (excluindo Schroeder), busca por Blumenau juntando paradas de duas rotas diferentes, contagem por cidade no datalist batendo, exclusao de rota limpando a cidade da lista de sugestoes.
+
 ## Validacoes locais recentes
 
 - `npm test` passou com `63/63` em `05/08/2026` apos a automacao de pendencias (`16` testes novos de regra + `3` de endpoint).

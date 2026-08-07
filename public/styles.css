@@ -885,33 +885,39 @@ button:disabled,
   flex-shrink: 0;
 }
 
-.route-stops {
-  display: grid;
-  gap: 6px;
-  margin: 12px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.route-stop-item {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 8px 12px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid var(--line);
-}
-
-.route-stop-index {
-  min-width: 22px;
-  font-weight: 800;
+.route-op-badge {
+  display: inline-block;
+  margin-bottom: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(11, 90, 168, 0.1);
   color: var(--blue);
-  font-variant-numeric: tabular-nums;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-.route-stop-address {
-  overflow-wrap: anywhere;
+.route-source {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.route-form-hint {
+  margin: -6px 0 4px;
+  font-size: 0.8rem;
+}
+
+.route-manage-head {
+  margin-top: 22px;
+}
+
+.routes-manage-list {
+  display: grid;
+  gap: 10px;
 }
 
 .employees-table {

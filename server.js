@@ -99,22 +99,27 @@ function serializeVehicleWithUsage(vehicle, usage) {
   };
 }
 
-function serializeRouteStop(stop) {
+function serializeRouteStop(stop, route) {
   return {
     id: stop.id,
+    operation: stop.operation || "",
+    city: stop.city,
+    client: stop.client || "",
     address: stop.address,
+    contact: stop.contact || "",
     order: stop.stop_order,
+    routeId: stop.route_id,
+    routeName: route ? route.name : undefined,
   };
 }
 
 function serializeRoute(route, stops) {
   return {
     id: route.id,
-    city: route.city,
     name: route.name,
     createdAt: route.created_at,
     stopCount: stops ? stops.length : undefined,
-    stops: stops ? stops.map(serializeRouteStop) : undefined,
+    stops: stops ? stops.map((stop) => serializeRouteStop(stop, route)) : undefined,
   };
 }
 
@@ -227,14 +232,14 @@ async function validateSupabaseSchema() {
       table: "routes",
       query: supabase
         .from("routes")
-        .select("id, city, name", { head: true, count: "exact" })
+        .select("id, name", { head: true, count: "exact" })
         .limit(1),
     },
     {
       table: "route_stops",
       query: supabase
         .from("route_stops")
-        .select("id, route_id, address, stop_order", { head: true, count: "exact" })
+        .select("id, route_id, operation, city, client, address, contact, stop_order", { head: true, count: "exact" })
         .limit(1),
     },
   ];
@@ -1122,9 +1127,8 @@ async function listRouteStopsForRoute(routeId) {
     .sort((left, right) => left.stop_order - right.stop_order);
 }
 
-async function insertRoute(city, name) {
+async function insertRoute(name) {
   const payload = {
-    city: String(city).trim(),
     name: String(name).trim(),
   };
 
@@ -1147,10 +1151,14 @@ async function insertRoute(city, name) {
   return route;
 }
 
-async function insertRouteStops(routeId, addresses) {
-  const payloads = addresses.map((address, index) => ({
+async function insertRouteStops(routeId, stops) {
+  const payloads = stops.map((stop, index) => ({
     route_id: routeId,
-    address: String(address).trim(),
+    operation: String(stop.operation || "").trim(),
+    city: String(stop.city).trim(),
+    client: String(stop.client || "").trim(),
+    address: String(stop.address).trim(),
+    contact: String(stop.contact || "").trim(),
     stop_order: index,
   }));
 
@@ -1167,13 +1175,13 @@ async function insertRouteStops(routeId, addresses) {
     );
   }
 
-  const stops = payloads.map((payload) => ({
+  const insertedStops = payloads.map((payload) => ({
     id: localRouteStopSequence++,
     ...payload,
     created_at: new Date().toISOString(),
   }));
-  localRouteStops.push(...stops);
-  return stops;
+  localRouteStops.push(...insertedStops);
+  return insertedStops;
 }
 
 async function deleteRoute(routeId) {
@@ -1824,18 +1832,18 @@ function normalizeCityKey(value) {
 }
 
 app.get("/api/admin/routes/cities", requireAdmin, asyncRoute(async (_req, res) => {
-  const routes = await listAllRoutes();
+  const stops = await listAllRouteStops();
   const countsByCity = new Map();
 
-  for (const route of routes) {
-    const city = String(route.city || "").trim();
+  for (const stop of stops) {
+    const city = String(stop.city || "").trim();
     if (!city) {
       continue;
     }
 
     const key = normalizeCityKey(city);
-    const current = countsByCity.get(key) || { city, routeCount: 0 };
-    current.routeCount += 1;
+    const current = countsByCity.get(key) || { city, stopCount: 0 };
+    current.stopCount += 1;
     countsByCity.set(key, current);
   }
 
@@ -1846,28 +1854,37 @@ app.get("/api/admin/routes/cities", requireAdmin, asyncRoute(async (_req, res) =
   return res.json({ cities });
 }));
 
+// Sem ?city, lista todas as rotas (um PDF/print cada) para o admin gerenciar
+// (ver quantos enderecos tem, excluir). Com ?city, devolve os enderecos daquela
+// cidade juntando todas as rotas, ja que um mesmo PDF pode misturar cidades.
 app.get("/api/admin/routes", requireAdmin, asyncRoute(async (req, res) => {
   const city = String(req.query.city || "").trim();
+
   if (!city) {
-    return res.status(400).json({ error: "Informe a cidade para buscar as rotas." });
+    const [allRoutes, allStops] = await Promise.all([listAllRoutes(), listAllRouteStops()]);
+    const stopCountByRoute = new Map();
+    for (const stop of allStops) {
+      const key = String(stop.route_id);
+      stopCountByRoute.set(key, (stopCountByRoute.get(key) || 0) + 1);
+    }
+
+    const routes = allRoutes.map((route) => ({
+      ...serializeRoute(route),
+      stopCount: stopCountByRoute.get(String(route.id)) || 0,
+    }));
+
+    return res.json({ routes });
   }
 
   const cityKey = normalizeCityKey(city);
   const [allRoutes, allStops] = await Promise.all([listAllRoutes(), listAllRouteStops()]);
-  const cityRoutes = allRoutes.filter((route) => normalizeCityKey(route.city) === cityKey);
-  const stopCountByRoute = new Map();
+  const routeById = new Map(allRoutes.map((route) => [String(route.id), route]));
+  const matchingStops = allStops
+    .filter((stop) => normalizeCityKey(stop.city) === cityKey)
+    .map((stop) => serializeRouteStop(stop, routeById.get(String(stop.route_id))))
+    .sort((left, right) => String(left.routeName || "").localeCompare(String(right.routeName || ""), "pt-BR"));
 
-  for (const stop of allStops) {
-    const key = String(stop.route_id);
-    stopCountByRoute.set(key, (stopCountByRoute.get(key) || 0) + 1);
-  }
-
-  const routes = cityRoutes.map((route) => ({
-    ...serializeRoute(route),
-    stopCount: stopCountByRoute.get(String(route.id)) || 0,
-  }));
-
-  return res.json({ city, routes });
+  return res.json({ city, stops: matchingStops });
 }));
 
 app.get("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) => {
@@ -1881,28 +1898,31 @@ app.get("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) 
 }));
 
 app.post("/api/admin/routes", requireAdmin, asyncRoute(async (req, res) => {
-  const { city, name, addresses } = req.body || {};
-  const normalizedCity = String(city || "").trim();
+  const { name, stops } = req.body || {};
   const normalizedName = String(name || "").trim();
-  const normalizedAddresses = Array.isArray(addresses)
-    ? addresses.map((address) => String(address || "").trim()).filter(Boolean)
+  const normalizedStops = Array.isArray(stops)
+    ? stops
+      .map((stop) => ({
+        operation: String(stop?.operation || "").trim(),
+        city: String(stop?.city || "").trim(),
+        client: String(stop?.client || "").trim(),
+        address: String(stop?.address || "").trim(),
+        contact: String(stop?.contact || "").trim(),
+      }))
+      .filter((stop) => stop.city && stop.address)
     : [];
-
-  if (!normalizedCity) {
-    return res.status(400).json({ error: "Informe a cidade da rota." });
-  }
 
   if (!normalizedName) {
     return res.status(400).json({ error: "Informe um nome para a rota." });
   }
 
-  if (!normalizedAddresses.length) {
-    return res.status(400).json({ error: "Informe ao menos um endereco para a rota." });
+  if (!normalizedStops.length) {
+    return res.status(400).json({ error: "Informe ao menos um endereco com cidade para a rota." });
   }
 
-  const route = await insertRoute(normalizedCity, normalizedName);
-  const stops = await insertRouteStops(route.id, normalizedAddresses);
-  return res.status(201).json({ route: serializeRoute(route, stops) });
+  const route = await insertRoute(normalizedName);
+  const insertedStops = await insertRouteStops(route.id, normalizedStops);
+  return res.status(201).json({ route: serializeRoute(route, insertedStops) });
 }));
 
 app.delete("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) => {

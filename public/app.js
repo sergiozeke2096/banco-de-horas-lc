@@ -17,9 +17,9 @@ const state = {
   showRouteRegisterForm: false,
   routeCities: [],
   routeSearchCity: "",
-  routeResults: [],
-  routeStopsById: {},
-  expandedRouteIds: [],
+  routeStopResults: [],
+  showRouteManageList: false,
+  routeManageRoutes: [],
   summaryCollapsed: false,
   aggregatesCollapsed: false,
   alertsCollapsed: false,
@@ -101,15 +101,16 @@ const adminTabRotas = document.querySelector("#adminTabRotas");
 const adminOverviewDot = document.querySelector("#adminOverviewDot");
 const toggleRouteRegisterButton = document.querySelector("#toggleRouteRegisterButton");
 const routeRegisterForm = document.querySelector("#routeRegisterForm");
-const registerRouteCity = document.querySelector("#registerRouteCity");
 const registerRouteName = document.querySelector("#registerRouteName");
-const registerRouteAddresses = document.querySelector("#registerRouteAddresses");
+const registerRouteStops = document.querySelector("#registerRouteStops");
 const routeManagerMessage = document.querySelector("#routeManagerMessage");
 const routeCitySearchInput = document.querySelector("#routeCitySearchInput");
 const routeCitySuggestions = document.querySelector("#routeCitySuggestions");
 const searchRoutesButton = document.querySelector("#searchRoutesButton");
 const clearRouteSearchButton = document.querySelector("#clearRouteSearchButton");
 const routesResults = document.querySelector("#routesResults");
+const toggleRouteManageButton = document.querySelector("#toggleRouteManageButton");
+const routeManageList = document.querySelector("#routeManageList");
 const recordsSection = document.querySelector("#recordsSection");
 const alertsPanel = document.querySelector("#alertsPanel");
 const alertsTitle = document.querySelector("#alertsTitle");
@@ -1697,7 +1698,7 @@ function renderRouteCitySuggestions() {
   for (const entry of state.routeCities) {
     const option = document.createElement("option");
     option.value = entry.city;
-    option.textContent = `${entry.city} (${entry.routeCount})`;
+    option.textContent = `${entry.city} (${entry.stopCount})`;
     routeCitySuggestions.appendChild(option);
   }
 }
@@ -1714,18 +1715,37 @@ async function loadRouteCities() {
   renderRouteCitySuggestions();
 }
 
+// Cada linha colada vira uma parada: Operacao, Cidade, Cliente, Endereco,
+// Contato, nessa ordem. Aceita Tab (o que sai ao colar do Excel/Sheets) ou "|"
+// (para quem preferir digitar a mao). Linhas sem cidade ou sem endereco sao
+// descartadas, ja que o backend tambem exige os dois.
+function parseRouteStopsInput(rawText) {
+  return rawText
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const delimiter = line.includes("\t") ? "\t" : "|";
+      const [operation = "", city = "", client = "", address = "", contact = ""] = line
+        .split(delimiter)
+        .map((field) => field.trim());
+      return { operation, city, client, address, contact };
+    })
+    .filter((stop) => stop.city && stop.address);
+}
+
 async function handleRouteRegister(event) {
   event.preventDefault();
 
-  const addresses = registerRouteAddresses.value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const stops = parseRouteStopsInput(registerRouteStops.value);
+  if (!stops.length) {
+    setRouteManagerMessage("Nenhuma parada valida encontrada. Cada linha precisa de cidade e endereco.", true);
+    return;
+  }
 
   const payload = {
-    city: registerRouteCity.value.trim(),
     name: registerRouteName.value.trim(),
-    addresses,
+    stops,
   };
 
   try {
@@ -1734,14 +1754,15 @@ async function handleRouteRegister(event) {
       body: JSON.stringify(payload),
     });
     routeRegisterForm.reset();
-    setRouteManagerMessage(`Rota "${data.route.name}" cadastrada com ${data.route.stopCount} endereco(s).`);
+    setRouteManagerMessage(`Rota "${data.route.name}" cadastrada com ${data.route.stopCount} parada(s).`);
     state.showRouteRegisterForm = false;
     renderRouteRegisterForm();
     await loadRouteCities();
-    // Se a busca atual ja esta na mesma cidade da rota recem-criada, atualiza
-    // a lista na hora para a rota nova aparecer sem precisar buscar de novo.
-    if (state.routeSearchCity && normalizeSearchValue(state.routeSearchCity) === normalizeSearchValue(payload.city)) {
+    if (state.routeSearchCity) {
       await handleSearchRoutes();
+    }
+    if (state.showRouteManageList) {
+      await loadRouteManageList();
     }
   } catch (error) {
     setRouteManagerMessage(error.message, true);
@@ -1754,46 +1775,36 @@ function renderRoutesResults() {
   }
 
   if (!state.routeSearchCity) {
-    routesResults.innerHTML = '<p class="muted">Busque uma cidade para ver as rotas cadastradas.</p>';
+    routesResults.innerHTML = '<p class="muted">Busque uma cidade para ver os enderecos cadastrados.</p>';
     return;
   }
 
-  if (!state.routeResults.length) {
-    routesResults.innerHTML = `<p class="muted">Nenhuma rota cadastrada para ${escapeHtml(state.routeSearchCity)}.</p>`;
+  if (!state.routeStopResults.length) {
+    routesResults.innerHTML = `<p class="muted">Nenhum endereco cadastrado para ${escapeHtml(state.routeSearchCity)}.</p>`;
     return;
   }
 
-  routesResults.innerHTML = state.routeResults
-    .map((route) => {
-      const key = String(route.id);
-      const isExpanded = state.expandedRouteIds.includes(key);
-      const stops = state.routeStopsById[key];
-      const stopsHtml = isExpanded
-        ? stops
-          ? `<ol class="route-stops">${stops
-              .map((stop, index) => `
-                <li class="route-stop-item">
-                  <span class="route-stop-index">${index + 1}.</span>
-                  <span class="route-stop-address">${escapeHtml(stop.address)}</span>
-                </li>
-              `)
-              .join("")}</ol>`
-          : '<p class="muted">Carregando enderecos...</p>'
+  routesResults.innerHTML = state.routeStopResults
+    .map((stop) => {
+      const opBadge = stop.operation
+        ? `<span class="route-op-badge">${escapeHtml(stop.operation)}</span>`
+        : "";
+      const clientLine = stop.client ? `<h4 class="route-name">${escapeHtml(stop.client)}</h4>` : "";
+      const contactLine = stop.contact
+        ? `<p class="route-meta">Contato: ${escapeHtml(stop.contact)}</p>`
         : "";
 
       return `
         <article class="route-card">
           <div class="route-card-head">
             <div>
-              <h4 class="route-name">${escapeHtml(route.name)}</h4>
-              <p class="route-meta">${escapeHtml(route.city)} - ${route.stopCount} endereco${route.stopCount === 1 ? "" : "s"} - ${escapeHtml(formatCreatedAt(route.createdAt))}</p>
-            </div>
-            <div class="route-card-actions">
-              <button type="button" class="ghost table-action" data-toggle-route="${route.id}">${isExpanded ? "Ocultar" : "Ver enderecos"}</button>
-              <button type="button" class="ghost table-action" data-delete-route="${route.id}">Excluir</button>
+              ${opBadge}
+              ${clientLine}
+              <p class="route-meta">${escapeHtml(stop.city)} - ${escapeHtml(stop.address)}</p>
+              ${contactLine}
             </div>
           </div>
-          ${stopsHtml}
+          <p class="route-source">Rota: ${escapeHtml(stop.routeName || "-")}</p>
         </article>
       `;
     })
@@ -1810,8 +1821,7 @@ async function handleSearchRoutes() {
   try {
     const data = await api(`/api/admin/routes${buildQueryString({ city })}`);
     state.routeSearchCity = data.city;
-    state.routeResults = data.routes || [];
-    state.expandedRouteIds = [];
+    state.routeStopResults = data.stops || [];
     setRouteManagerMessage("");
     renderRoutesResults();
   } catch (error) {
@@ -1822,59 +1832,95 @@ async function handleSearchRoutes() {
 function handleClearRouteSearch() {
   routeCitySearchInput.value = "";
   state.routeSearchCity = "";
-  state.routeResults = [];
-  state.expandedRouteIds = [];
+  state.routeStopResults = [];
   setRouteManagerMessage("");
   renderRoutesResults();
 }
 
-async function handleRoutesResultsClick(event) {
-  const toggleButton = event.target.closest("[data-toggle-route]");
-  if (toggleButton) {
-    const key = String(toggleButton.dataset.toggleRoute);
-    if (state.expandedRouteIds.includes(key)) {
-      state.expandedRouteIds = state.expandedRouteIds.filter((id) => id !== key);
-      renderRoutesResults();
-      return;
-    }
-
-    state.expandedRouteIds = [...state.expandedRouteIds, key];
-    renderRoutesResults();
-
-    if (!state.routeStopsById[key]) {
-      try {
-        const data = await api(`/api/admin/routes/${key}`);
-        state.routeStopsById[key] = data.route.stops || [];
-        renderRoutesResults();
-      } catch (error) {
-        setRouteManagerMessage(error.message, true);
-      }
-    }
+function renderRouteManageList() {
+  if (!routeManageList || !toggleRouteManageButton) {
     return;
   }
 
-  const deleteButton = event.target.closest("[data-delete-route]");
-  if (deleteButton) {
-    const routeId = deleteButton.dataset.deleteRoute;
-    const route = state.routeResults.find((item) => String(item.id) === String(routeId));
-    if (!route) {
-      return;
-    }
+  routeManageList.classList.toggle("hidden", !state.showRouteManageList);
+  toggleRouteManageButton.textContent = state.showRouteManageList ? "Ocultar rotas" : "Ver todas as rotas";
 
-    const confirmed = window.confirm(`Excluir a rota "${route.name}"?`);
-    if (!confirmed) {
-      return;
-    }
+  if (!state.showRouteManageList) {
+    return;
+  }
 
+  if (!state.routeManageRoutes.length) {
+    routeManageList.innerHTML = '<p class="muted">Nenhuma rota cadastrada ainda.</p>';
+    return;
+  }
+
+  routeManageList.innerHTML = state.routeManageRoutes
+    .map((route) => `
+      <article class="route-card">
+        <div class="route-card-head">
+          <div>
+            <h4 class="route-name">${escapeHtml(route.name)}</h4>
+            <p class="route-meta">${route.stopCount} parada${route.stopCount === 1 ? "" : "s"} - ${escapeHtml(formatCreatedAt(route.createdAt))}</p>
+          </div>
+          <div class="route-card-actions">
+            <button type="button" class="ghost table-action" data-delete-route="${route.id}">Excluir</button>
+          </div>
+        </div>
+      </article>
+    `)
+    .join("");
+}
+
+async function loadRouteManageList() {
+  const data = await api("/api/admin/routes");
+  state.routeManageRoutes = data.routes || [];
+  renderRouteManageList();
+}
+
+async function handleToggleRouteManage() {
+  if (state.user?.role !== "admin") {
+    return;
+  }
+
+  state.showRouteManageList = !state.showRouteManageList;
+  renderRouteManageList();
+
+  if (state.showRouteManageList) {
     try {
-      await api(`/api/admin/routes/${routeId}`, { method: "DELETE" });
-      setRouteManagerMessage(`Rota "${route.name}" excluida com sucesso.`);
-      delete state.routeStopsById[String(routeId)];
-      await loadRouteCities();
-      await handleSearchRoutes();
+      await loadRouteManageList();
     } catch (error) {
       setRouteManagerMessage(error.message, true);
     }
+  }
+}
+
+async function handleRouteManageListClick(event) {
+  const deleteButton = event.target.closest("[data-delete-route]");
+  if (!deleteButton) {
+    return;
+  }
+
+  const routeId = deleteButton.dataset.deleteRoute;
+  const route = state.routeManageRoutes.find((item) => String(item.id) === String(routeId));
+  if (!route) {
+    return;
+  }
+
+  const confirmed = window.confirm(`Excluir a rota "${route.name}" e suas ${route.stopCount} parada(s)?`);
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await api(`/api/admin/routes/${routeId}`, { method: "DELETE" });
+    setRouteManagerMessage(`Rota "${route.name}" excluida com sucesso.`);
+    await loadRouteCities();
+    await loadRouteManageList();
+    if (state.routeSearchCity) {
+      await handleSearchRoutes();
+    }
+  } catch (error) {
+    setRouteManagerMessage(error.message, true);
   }
 }
 
@@ -1917,6 +1963,7 @@ function renderSession() {
   renderAlerts();
   renderRouteRegisterForm();
   renderRoutesResults();
+  renderRouteManageList();
   renderAdminTabs();
 }
 
@@ -2286,9 +2333,9 @@ async function handleLogout() {
   state.showRouteRegisterForm = false;
   state.routeCities = [];
   state.routeSearchCity = "";
-  state.routeResults = [];
-  state.routeStopsById = {};
-  state.expandedRouteIds = [];
+  state.routeStopResults = [];
+  state.showRouteManageList = false;
+  state.routeManageRoutes = [];
   if (routeCitySearchInput) {
     routeCitySearchInput.value = "";
   }
@@ -3340,7 +3387,8 @@ bindEvent(toggleRouteRegisterButton, "click", handleToggleRouteRegisterForm);
 bindEvent(routeRegisterForm, "submit", handleRouteRegister);
 bindEvent(searchRoutesButton, "click", handleSearchRoutes);
 bindEvent(clearRouteSearchButton, "click", handleClearRouteSearch);
-bindEvent(routesResults, "click", handleRoutesResultsClick);
+bindEvent(toggleRouteManageButton, "click", handleToggleRouteManage);
+bindEvent(routeManageList, "click", handleRouteManageListClick);
 bindEvent(vehicleDialog, "cancel", handleVehicleCancel);
 bindEvent(vehicleDialog, "close", handleVehicleDialogClose);
 bindEvent(vehicleTransferForm, "submit", handleVehicleTransferSubmit);

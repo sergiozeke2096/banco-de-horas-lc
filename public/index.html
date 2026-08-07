@@ -372,34 +372,38 @@
             </div>
             <form id="routeRegisterForm" class="stack hidden">
               <label>
-                Cidade
-                <input id="registerRouteCity" type="text" placeholder="Ex.: Joinville" required>
-              </label>
-              <label>
                 Nome da rota
-                <input id="registerRouteName" type="text" placeholder="Ex.: Joinville - 06/08/2026" required>
+                <input id="registerRouteName" type="text" placeholder="Ex.: Leandro - 06/08/2026" required>
               </label>
               <label>
-                Enderecos (um por linha)
-                <textarea id="registerRouteAddresses" class="route-addresses-input" rows="8" placeholder="Rua Exemplo, 123 - Bairro&#10;Rua Outra, 456 - Bairro" required></textarea>
+                Paradas (uma por linha: Operacao, Cidade, Cliente, Endereco, Contato)
+                <textarea id="registerRouteStops" class="route-addresses-input" rows="10" placeholder="Cole aqui direto do Excel/print. Uma parada por linha, campos separados por Tab ou por |&#10;Pick-up | Blumenau | Loja Vestis | Rua Dr. Pedro Zimmermann, 2833 | (47) 99920-8255&#10;Minidrop | Joinville | SC-W-MD009 | Rua Boehmerwald N 2788 | 47991770696" required></textarea>
               </label>
+              <p class="muted route-form-hint">Cidade e Endereco sao obrigatorios em cada linha. Operacao, Cliente e Contato podem ficar em branco.</p>
               <button type="submit" class="secondary">Salvar rota</button>
             </form>
             <p class="feedback manager-feedback" id="routeManagerMessage"></p>
             <div class="admin-search-panel">
               <label class="filter-label" for="routeCitySearchInput">
-                Buscar rotas por cidade
+                Buscar enderecos por cidade
                 <input id="routeCitySearchInput" type="text" list="routeCitySuggestions" placeholder="Ex.: Joinville ou Brusque">
               </label>
               <datalist id="routeCitySuggestions"></datalist>
               <div class="filter-actions">
-                <button type="button" class="secondary" id="searchRoutesButton">Buscar rotas</button>
+                <button type="button" class="secondary" id="searchRoutesButton">Buscar enderecos</button>
                 <button type="button" class="ghost" id="clearRouteSearchButton">Limpar busca</button>
               </div>
             </div>
             <div class="routes-results" id="routesResults">
-              <p class="muted">Busque uma cidade para ver as rotas cadastradas.</p>
+              <p class="muted">Busque uma cidade para ver os enderecos cadastrados.</p>
             </div>
+            <div class="admin-block-head route-manage-head">
+              <div>
+                <h4>Rotas cadastradas</h4>
+              </div>
+              <button type="button" class="ghost" id="toggleRouteManageButton">Ver todas as rotas</button>
+            </div>
+            <div class="routes-manage-list hidden" id="routeManageList"></div>
           </article>
         </div>
       </section>
