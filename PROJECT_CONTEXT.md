@@ -222,6 +222,14 @@ Trabalho feito **apenas localmente** ainda, sem publicar na VPS. Sao mudancas so
 - `renderEmployeeTimeline()` em [public/app.js](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/public/app.js) agora chama `computeJourneyState()` e marca o **ultimo** registro do dia com a classe `punch-active` + badge "Em andamento" (bolinha verde pulsando) sempre que a jornada ainda esta aberta (status `working` ou `break`). Jornada fechada (`done`) ou sem registros hoje: nenhum item ganha o badge.
 - Validado com dois funcionarios: um com jornada aberta (badge aparece no ultimo evento) e um com jornada fechada (`activeCount: 0` confirmado via DOM). `npm test` segue `67/67` (mudanca so de frontend).
 
+## Marca d'agua virou logo grande cobrindo a tela em 06/08/2026
+
+- O usuario pediu para a logo aparecer como marca d'agua espalhada pela tela toda (nao so um detalhe de canto), valendo para login, admin e funcionario. Como `.watermark-logo` ja e um unico `<img>` fixo direto no `<body>` (fora dos paineis), a mesma regra ja vale automaticamente para as tres telas.
+- `.watermark-logo` em [public/styles.css](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/public/styles.css) deixou de ser um circulo pequeno no canto inferior direito e virou uma marca grande centralizada (`min(80vw, 760px)`, `92vw` no mobile), opacidade `0.16`.
+- O usuario pediu para testar a marca **na frente** do card (`z-index:5`) e nao gostou do resultado ("ficou feio") — **revertido para atras do card (`z-index:0`)**, que e o estado atual aprovado. Nao repropor a marca na frente do conteudo sem pedido explicito.
+- `pointer-events:none` garante que a marca nunca bloqueia clique em botao/campo, em nenhum dos dois z-index testados.
+- `npm test` segue `67/67` (mudanca so de CSS).
+
 ## Validacoes locais recentes
 
 - `npm test` passou com `63/63` em `05/08/2026` apos a automacao de pendencias (`16` testes novos de regra + `3` de endpoint).
