@@ -216,6 +216,12 @@ Trabalho feito **apenas localmente** ainda, sem publicar na VPS. Sao mudancas so
 - 4 testes novos de integracao para `/api/me/summary` (zerado sem registros, soma jornada fechada e ignora fora da janela de 7 dias, admin recebe zerado, carga horaria de 9:18 pra matricula 2). Suite: `67/67`.
 - **Nota operacional para sessoes futuras**: nesta sessao, um processo de teste local antigo (de uma conversa anterior) ficou vivo na porta `3111` sem ser encerrado corretamente e continuou respondendo com codigo desatualizado, causando um falso bug (`/api/me/summary` parecia nao existir). Antes de testar qualquer rota nova no servidor local, confirmar com `Get-NetTCPConnection -LocalPort 3111` que o processo respondendo e o que acabou de ser iniciado (comparar `StartTime` do processo com o horario atual), nao um processo esquecido de uma sessao anterior.
 
+## "Meus registros" ganhou destaque de evento em andamento em 06/08/2026
+
+- O usuario achou a lista "Meus registros" simples demais e recebeu 3 opcoes (duracao entre pontos, linha conectando os eventos, destaque no evento em andamento). Escolheu so o destaque.
+- `renderEmployeeTimeline()` em [public/app.js](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/public/app.js) agora chama `computeJourneyState()` e marca o **ultimo** registro do dia com a classe `punch-active` + badge "Em andamento" (bolinha verde pulsando) sempre que a jornada ainda esta aberta (status `working` ou `break`). Jornada fechada (`done`) ou sem registros hoje: nenhum item ganha o badge.
+- Validado com dois funcionarios: um com jornada aberta (badge aparece no ultimo evento) e um com jornada fechada (`activeCount: 0` confirmado via DOM). `npm test` segue `67/67` (mudanca so de frontend).
+
 ## Validacoes locais recentes
 
 - `npm test` passou com `63/63` em `05/08/2026` apos a automacao de pendencias (`16` testes novos de regra + `3` de endpoint).
