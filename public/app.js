@@ -18,8 +18,6 @@ const state = {
   routeCities: [],
   routeSearchCity: "",
   routeStopResults: [],
-  showRouteManageList: false,
-  routeManageRoutes: [],
   summaryCollapsed: false,
   aggregatesCollapsed: false,
   alertsCollapsed: false,
@@ -109,8 +107,6 @@ const routeCitySuggestions = document.querySelector("#routeCitySuggestions");
 const searchRoutesButton = document.querySelector("#searchRoutesButton");
 const clearRouteSearchButton = document.querySelector("#clearRouteSearchButton");
 const routesResults = document.querySelector("#routesResults");
-const toggleRouteManageButton = document.querySelector("#toggleRouteManageButton");
-const routeManageList = document.querySelector("#routeManageList");
 const recordsSection = document.querySelector("#recordsSection");
 const alertsPanel = document.querySelector("#alertsPanel");
 const alertsTitle = document.querySelector("#alertsTitle");
@@ -1761,9 +1757,6 @@ async function handleRouteRegister(event) {
     if (state.routeSearchCity) {
       await handleSearchRoutes();
     }
-    if (state.showRouteManageList) {
-      await loadRouteManageList();
-    }
   } catch (error) {
     setRouteManagerMessage(error.message, true);
   }
@@ -1837,93 +1830,6 @@ function handleClearRouteSearch() {
   renderRoutesResults();
 }
 
-function renderRouteManageList() {
-  if (!routeManageList || !toggleRouteManageButton) {
-    return;
-  }
-
-  routeManageList.classList.toggle("hidden", !state.showRouteManageList);
-  toggleRouteManageButton.textContent = state.showRouteManageList ? "Ocultar rotas" : "Ver todas as rotas";
-
-  if (!state.showRouteManageList) {
-    return;
-  }
-
-  if (!state.routeManageRoutes.length) {
-    routeManageList.innerHTML = '<p class="muted">Nenhuma rota cadastrada ainda.</p>';
-    return;
-  }
-
-  routeManageList.innerHTML = state.routeManageRoutes
-    .map((route) => `
-      <article class="route-card">
-        <div class="route-card-head">
-          <div>
-            <h4 class="route-name">${escapeHtml(route.name)}</h4>
-            <p class="route-meta">${route.stopCount} parada${route.stopCount === 1 ? "" : "s"} - ${escapeHtml(formatCreatedAt(route.createdAt))}</p>
-          </div>
-          <div class="route-card-actions">
-            <button type="button" class="ghost table-action" data-delete-route="${route.id}">Excluir</button>
-          </div>
-        </div>
-      </article>
-    `)
-    .join("");
-}
-
-async function loadRouteManageList() {
-  const data = await api("/api/admin/routes");
-  state.routeManageRoutes = data.routes || [];
-  renderRouteManageList();
-}
-
-async function handleToggleRouteManage() {
-  if (state.user?.role !== "admin") {
-    return;
-  }
-
-  state.showRouteManageList = !state.showRouteManageList;
-  renderRouteManageList();
-
-  if (state.showRouteManageList) {
-    try {
-      await loadRouteManageList();
-    } catch (error) {
-      setRouteManagerMessage(error.message, true);
-    }
-  }
-}
-
-async function handleRouteManageListClick(event) {
-  const deleteButton = event.target.closest("[data-delete-route]");
-  if (!deleteButton) {
-    return;
-  }
-
-  const routeId = deleteButton.dataset.deleteRoute;
-  const route = state.routeManageRoutes.find((item) => String(item.id) === String(routeId));
-  if (!route) {
-    return;
-  }
-
-  const confirmed = window.confirm(`Excluir a rota "${route.name}" e suas ${route.stopCount} parada(s)?`);
-  if (!confirmed) {
-    return;
-  }
-
-  try {
-    await api(`/api/admin/routes/${routeId}`, { method: "DELETE" });
-    setRouteManagerMessage(`Rota "${route.name}" excluida com sucesso.`);
-    await loadRouteCities();
-    await loadRouteManageList();
-    if (state.routeSearchCity) {
-      await handleSearchRoutes();
-    }
-  } catch (error) {
-    setRouteManagerMessage(error.message, true);
-  }
-}
-
 function renderSession() {
   const user = state.user;
   const loggedIn = Boolean(user);
@@ -1963,7 +1869,6 @@ function renderSession() {
   renderAlerts();
   renderRouteRegisterForm();
   renderRoutesResults();
-  renderRouteManageList();
   renderAdminTabs();
 }
 
@@ -2334,8 +2239,6 @@ async function handleLogout() {
   state.routeCities = [];
   state.routeSearchCity = "";
   state.routeStopResults = [];
-  state.showRouteManageList = false;
-  state.routeManageRoutes = [];
   if (routeCitySearchInput) {
     routeCitySearchInput.value = "";
   }
@@ -3387,8 +3290,6 @@ bindEvent(toggleRouteRegisterButton, "click", handleToggleRouteRegisterForm);
 bindEvent(routeRegisterForm, "submit", handleRouteRegister);
 bindEvent(searchRoutesButton, "click", handleSearchRoutes);
 bindEvent(clearRouteSearchButton, "click", handleClearRouteSearch);
-bindEvent(toggleRouteManageButton, "click", handleToggleRouteManage);
-bindEvent(routeManageList, "click", handleRouteManageListClick);
 bindEvent(vehicleDialog, "cancel", handleVehicleCancel);
 bindEvent(vehicleDialog, "close", handleVehicleDialogClose);
 bindEvent(vehicleTransferForm, "submit", handleVehicleTransferSubmit);

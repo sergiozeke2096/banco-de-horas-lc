@@ -261,6 +261,17 @@ Trabalho feito **apenas localmente** ainda, sem publicar na VPS. Sao mudancas so
 - Testes de integracao reescritos para o novo contrato (6 testes, incluindo o caso real de uma rota com paradas em cidades diferentes e paradas invalidas sendo descartadas sem derrubar o cadastro). Suite: `73/73`.
 - Validado no navegador com dados reais das planilhas que o usuario mandou (Leandro - Blumenau/Benedito Novo, Leandro - Jaragua do Sul com uma parada em Schroeder misturada): cadastro via paste TSV, busca por Jaraguau do Sul trazendo so as 4 paradas certas (excluindo Schroeder), busca por Blumenau juntando paradas de duas rotas diferentes, contagem por cidade no datalist batendo, exclusao de rota limpando a cidade da lista de sugestoes.
 
+## Rotas: dados reais cadastrados e secao "Rotas cadastradas" removida em 07/08/2026
+
+- O usuario mandou todos os prints reais de rota (18 tabelas ao todo: Leandro, Ernandes LC, e as rotas nomeadas "Brusque x Hub Blumenau - Direto 1/2", "Indaial x Hub Blumenau - Direto", "Itajai x Hub Blumenau - Direto"). Cada tabela separada virou uma rota (seguindo a regra original do usuario: "cada PDF vira uma rota"). Resultado: **18 rotas, 67 paradas, 17 cidades**, cadastradas no servidor local via script (`seed-real-routes.js` no scratchpad da sessao, nao versionado no repo).
+- Duas pendencias sinalizadas ao usuario e ainda nao resolvidas:
+  - Uma linha do print de Brusque ("Sieri Textil") nao tinha endereco nenhum, foi descartada.
+  - "VITA COMERCIO DE SUPLEMENTOS LTDA" (Blumenau) e "MONPET BRASIL" (Itajai) apareciam duplicados nos proprios prints do usuario (uma vez na rota do Leandro, outra numa lista destacada em amarelo). Foram cadastrados como vieram, sem deduplicar.
+  - Pedido explicito ao usuario para conferir numeros de telefone e enderecos, ja que os dados vieram de imagens (risco de erro de leitura).
+- O usuario pediu para remover a secao "Rotas cadastradas" (lista de gerenciamento/exclusao de rota inteira, com o botao "Ver todas as rotas") do painel. Removida por completo: HTML, CSS (`.route-manage-head`, `.routes-manage-list`, `.route-card-actions`) e todo o JS relacionado (`renderRouteManageList`, `loadRouteManageList`, `handleToggleRouteManage`, `handleRouteManageListClick`, estado `showRouteManageList`/`routeManageRoutes`, refs e bindEvent).
+- **Consequencia importante**: o endpoint `DELETE /api/admin/routes/:routeId` continua existindo no backend (ainda testado, ainda funciona), mas agora **nao ha mais nenhum jeito de excluir uma rota pela interface**. Se o usuario precisar excluir uma rota, por enquanto so via API/script ou pedindo para uma sessao futura reativar algum jeito de fazer isso na UI.
+- `npm test` segue `73/73` (mudanca so de frontend).
+
 ## Validacoes locais recentes
 
 - `npm test` passou com `63/63` em `05/08/2026` apos a automacao de pendencias (`16` testes novos de regra + `3` de endpoint).

@@ -879,12 +879,6 @@ button:disabled,
   color: var(--muted);
 }
 
-.route-card-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
 .route-op-badge {
   display: inline-block;
   margin-bottom: 6px;
@@ -909,15 +903,6 @@ button:disabled,
 .route-form-hint {
   margin: -6px 0 4px;
   font-size: 0.8rem;
-}
-
-.route-manage-head {
-  margin-top: 22px;
-}
-
-.routes-manage-list {
-  display: grid;
-  gap: 10px;
 }
 
 .employees-table {
@@ -1470,10 +1455,6 @@ th {
   .route-card-head {
     flex-direction: column;
     align-items: stretch;
-  }
-
-  .route-card-actions {
-    justify-content: flex-end;
   }
 
   .export-actions {
