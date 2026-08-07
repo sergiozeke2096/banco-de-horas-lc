@@ -12,6 +12,7 @@ const state = {
   offlineSnapshotCachedAt: "",
   alerts: [],
   alertCounts: null,
+  adminTab: "overview",
   summaryCollapsed: false,
   aggregatesCollapsed: false,
   alertsCollapsed: false,
@@ -80,6 +81,12 @@ const journeySince = document.querySelector("#journeySince");
 const journeyWorked = document.querySelector("#journeyWorked");
 const journeyBreak = document.querySelector("#journeyBreak");
 const nextActionHint = document.querySelector("#nextActionHint");
+const adminTabs = document.querySelector("#adminTabs");
+const adminTabButtons = [...document.querySelectorAll(".admin-tab")];
+const adminTabOverview = document.querySelector("#adminTabOverview");
+const adminTabCadastros = document.querySelector("#adminTabCadastros");
+const adminOverviewDot = document.querySelector("#adminOverviewDot");
+const recordsSection = document.querySelector("#recordsSection");
 const alertsPanel = document.querySelector("#alertsPanel");
 const alertsTitle = document.querySelector("#alertsTitle");
 const alertsSubtitle = document.querySelector("#alertsSubtitle");
@@ -1426,6 +1433,8 @@ function buildAlertsSubtitle() {
 }
 
 function renderAlerts() {
+  renderAdminTabs();
+
   if (!alertsPanel || !alertsContent || !alertsTitle || !toggleAlertsButton) {
     return;
   }
@@ -1571,6 +1580,44 @@ function handleToggleAggregates() {
   renderSummaryAggregates();
 }
 
+// O painel do admin virou 3 abas (Visao geral / Registros / Cadastros) para nao
+// obrigar rolagem longa toda vez que o admin so quer ver pendencias. A secao de
+// Registros e compartilhada com a tela do funcionario, entao ela fica fora do
+// #adminPanel no DOM e e apenas escondida/mostrada aqui conforme a aba ativa.
+function renderAdminTabs() {
+  const isAdmin = state.user?.role === "admin";
+  if (adminTabs) {
+    adminTabs.classList.toggle("hidden", !isAdmin);
+  }
+
+  if (!isAdmin) {
+    recordsSection?.classList.remove("hidden");
+    return;
+  }
+
+  for (const button of adminTabButtons) {
+    button.classList.toggle("active", button.dataset.adminTab === state.adminTab);
+  }
+
+  adminTabOverview?.classList.toggle("hidden", state.adminTab !== "overview");
+  adminTabCadastros?.classList.toggle("hidden", state.adminTab !== "cadastros");
+  recordsSection?.classList.toggle("hidden", state.adminTab !== "registros");
+
+  if (adminOverviewDot) {
+    adminOverviewDot.classList.toggle("hidden", !state.alertCounts?.total);
+  }
+}
+
+function handleAdminTabClick(event) {
+  const button = event.target.closest(".admin-tab");
+  if (!button) {
+    return;
+  }
+
+  state.adminTab = button.dataset.adminTab;
+  renderAdminTabs();
+}
+
 function renderSession() {
   const user = state.user;
   const loggedIn = Boolean(user);
@@ -1607,6 +1654,7 @@ function renderSession() {
   renderSummary();
   renderSummaryAggregates();
   renderAlerts();
+  renderAdminTabs();
 }
 
 async function loadSession() {
@@ -1937,6 +1985,7 @@ async function handleLogout() {
   state.employeeManageSearchApplied = "";
   state.vehicleManageSearch = "";
   state.vehicleManageSearchApplied = "";
+  state.adminTab = "overview";
   state.adminFilters = {
     employeeId: "",
     vehiclePlate: "",
@@ -2962,6 +3011,7 @@ bindEvent(exportXlsxLink, "click", handleExportXlsx);
 bindEvent(toggleSummaryButton, "click", handleToggleSummary);
 bindEvent(toggleAggregatesButton, "click", handleToggleAggregates);
 bindEvent(toggleAlertsButton, "click", handleToggleAlerts);
+bindEvent(adminTabs, "click", handleAdminTabClick);
 bindEvent(employeeAdminBody, "click", handleEmployeeAdminClick);
 bindEvent(employeeEditForm, "submit", handleEmployeeEditSubmit);
 bindEvent(cancelEmployeeEditButton, "click", handleCancelEmployeeEdit);

@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/styles.css?v=20260321-03">
 </head>
 <body>
+  <img class="watermark-logo" src="/logo-lc.jpg" alt="" aria-hidden="true">
   <main class="shell">
     <section class="panel auth-panel" id="authPanel">
       <article class="card auth-card">
@@ -110,6 +111,95 @@
       </section>
 
       <section class="card hidden" id="adminPanel">
+        <div class="admin-tabs" id="adminTabs">
+          <button type="button" class="admin-tab" data-admin-tab="overview">
+            Visao geral
+            <span class="tab-dot hidden" id="adminOverviewDot"></span>
+          </button>
+          <button type="button" class="admin-tab" data-admin-tab="registros">Registros</button>
+          <button type="button" class="admin-tab" data-admin-tab="cadastros">Cadastros</button>
+        </div>
+
+        <div id="adminTabOverview">
+        <div class="stat-tile-row hidden" id="companyStatTiles">
+          <div class="stat-tile">
+            <p class="stat-tile-label">Funcionarios</p>
+            <p class="stat-tile-value" id="statTileEmployeeCount">0</p>
+          </div>
+          <div class="stat-tile stat-tile-worked">
+            <p class="stat-tile-label">Total de horas</p>
+            <p class="stat-tile-value" id="statTileWorked">00:00</p>
+          </div>
+          <div class="stat-tile stat-tile-overtime">
+            <p class="stat-tile-label">Horas extras</p>
+            <p class="stat-tile-value" id="statTileOvertime">00:00</p>
+          </div>
+          <div class="stat-tile stat-tile-km">
+            <p class="stat-tile-label">Total de KM</p>
+            <p class="stat-tile-value" id="statTileKm">0</p>
+          </div>
+        </div>
+        <div class="section-head hidden" id="alertsPanel">
+          <div>
+            <h3 id="alertsTitle">Pendencias</h3>
+            <p class="muted" id="alertsSubtitle"></p>
+          </div>
+          <button type="button" class="ghost" id="toggleAlertsButton">Ocultar pendencias</button>
+        </div>
+        <div class="alerts-list hidden" id="alertsContent"></div>
+        <div class="section-head hidden" id="summaryPanel">
+          <div>
+            <h3 id="summaryTitle">Resumo administrativo (ultimas 48h)</h3>
+          </div>
+          <button type="button" class="ghost" id="toggleSummaryButton">Ocultar resumo</button>
+        </div>
+        <div class="table-wrap hidden" id="summaryContent">
+          <table class="summary-table">
+            <thead>
+              <tr>
+                <th>Funcionario</th>
+                <th>Dia</th>
+                <th>Veiculo</th>
+                <th>Total de KM</th>
+                <th>Total de horas</th>
+                <th>Horas extras</th>
+                <th>Total de intervalo</th>
+              </tr>
+            </thead>
+            <tbody id="summaryBody">
+              <tr>
+                <td colspan="7" class="empty-row">Nenhum dado carregado.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="section-head hidden" id="employeeAggregatesPanel">
+          <div>
+            <h3>Totais por funcionario</h3>
+          </div>
+          <button type="button" class="ghost" id="toggleAggregatesButton">Ocultar totais</button>
+        </div>
+        <div class="table-wrap hidden" id="employeeAggregatesContent">
+          <table class="summary-table">
+            <thead>
+              <tr>
+                <th>Funcionario</th>
+                <th>Dias</th>
+                <th>Total de horas</th>
+                <th>Horas extras</th>
+                <th>Total de KM</th>
+              </tr>
+            </thead>
+            <tbody id="employeeAggregatesBody">
+              <tr>
+                <td colspan="5" class="empty-row">Nenhum dado carregado.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        </div>
+
+        <div class="hidden" id="adminTabCadastros">
         <div class="admin-grid">
           <article class="admin-block">
             <div class="admin-block-head">
@@ -255,85 +345,10 @@
             </section>
           </article>
         </div>
-        <div class="stat-tile-row hidden" id="companyStatTiles">
-          <div class="stat-tile">
-            <p class="stat-tile-label">Funcionarios</p>
-            <p class="stat-tile-value" id="statTileEmployeeCount">0</p>
-          </div>
-          <div class="stat-tile stat-tile-worked">
-            <p class="stat-tile-label">Total de horas</p>
-            <p class="stat-tile-value" id="statTileWorked">00:00</p>
-          </div>
-          <div class="stat-tile stat-tile-overtime">
-            <p class="stat-tile-label">Horas extras</p>
-            <p class="stat-tile-value" id="statTileOvertime">00:00</p>
-          </div>
-          <div class="stat-tile stat-tile-km">
-            <p class="stat-tile-label">Total de KM</p>
-            <p class="stat-tile-value" id="statTileKm">0</p>
-          </div>
-        </div>
-        <div class="section-head hidden" id="alertsPanel">
-          <div>
-            <h3 id="alertsTitle">Pendencias</h3>
-            <p class="muted" id="alertsSubtitle"></p>
-          </div>
-          <button type="button" class="ghost" id="toggleAlertsButton">Ocultar pendencias</button>
-        </div>
-        <div class="alerts-list hidden" id="alertsContent"></div>
-        <div class="section-head hidden" id="summaryPanel">
-          <div>
-            <h3 id="summaryTitle">Resumo administrativo (ultimas 48h)</h3>
-          </div>
-          <button type="button" class="ghost" id="toggleSummaryButton">Ocultar resumo</button>
-        </div>
-        <div class="table-wrap hidden" id="summaryContent">
-          <table class="summary-table">
-            <thead>
-              <tr>
-                <th>Funcionario</th>
-                <th>Dia</th>
-                <th>Veiculo</th>
-                <th>Total de KM</th>
-                <th>Total de horas</th>
-                <th>Horas extras</th>
-                <th>Total de intervalo</th>
-              </tr>
-            </thead>
-            <tbody id="summaryBody">
-              <tr>
-                <td colspan="7" class="empty-row">Nenhum dado carregado.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="section-head hidden" id="employeeAggregatesPanel">
-          <div>
-            <h3>Totais por funcionario</h3>
-          </div>
-          <button type="button" class="ghost" id="toggleAggregatesButton">Ocultar totais</button>
-        </div>
-        <div class="table-wrap hidden" id="employeeAggregatesContent">
-          <table class="summary-table">
-            <thead>
-              <tr>
-                <th>Funcionario</th>
-                <th>Dias</th>
-                <th>Total de horas</th>
-                <th>Horas extras</th>
-                <th>Total de KM</th>
-              </tr>
-            </thead>
-            <tbody id="employeeAggregatesBody">
-              <tr>
-                <td colspan="5" class="empty-row">Nenhum dado carregado.</td>
-              </tr>
-            </tbody>
-          </table>
         </div>
       </section>
 
-      <section class="card">
+      <section class="card" id="recordsSection">
         <div class="section-head">
           <div>
             <h3 id="recordsTitle">Registros</h3>

@@ -187,6 +187,15 @@ Trabalho feito **apenas localmente** ainda, sem publicar na VPS. Sao mudancas so
 - Tamanhos: topbar `92px -> 112px` no desktop e `72px -> 96px` no mobile; hero do login `190px -> 210px` no desktop e `130px -> 160px` no mobile.
 - O usuario avaliou uma proposta de tema futurista (fundo escuro, neon ciano) em `05/08/2026` e **decidiu manter a identidade LC atual**. Nao repropor tema escuro sem pedido: o app e usado na rua, e tema escuro perde legibilidade no sol.
 
+## Painel do admin reorganizado em abas + marca d'agua em 06/08/2026
+
+- O usuario recebeu duas propostas de reorganizacao do painel do admin (abas no topo vs. pendencias fixas com cadastros em gaveta) e **escolheu a opcao de abas**.
+- `#adminPanel` agora tem navegacao em 3 abas: `Visao geral` (totais + pendencias + resumo + agregados), `Registros` (filtros + lista + exportar) e `Cadastros` (cadastrar/gerenciar funcionario e veiculo). A aba `Visao geral` ganha uma bolinha vermelha quando `state.alertCounts.total > 0`.
+- A secao "Registros" continua compartilhada com a tela do funcionario (mesmo markup, `id="recordsSection"`) e fica **fora** do `#adminPanel` no DOM. Para o funcionario ela e sempre visivel; para o admin, `renderAdminTabs()` em [public/app.js](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/public/app.js) mostra/esconde ela conforme a aba ativa (`state.adminTab`, default `"overview"`, resetado no login e no logout).
+- Logo ganhou marca d'agua: `<img class="watermark-logo">` fixo no canto inferior direito do `body`, opacidade `0.05`, `pointer-events:none`, atras do `.shell` (`z-index:0` vs `z-index:1`). Substituiu o antigo watermark de texto "LC TRANSPORTES" (`body::before`) que fazia a mesma funcao de forma mais pobre.
+- Validado no navegador local (porta `3111`) nos dois tamanhos: as 3 abas trocam de conteudo corretamente, a tela do funcionario nao foi afetada (registros seguem sempre visiveis, abas do admin ficam escondidas), e a marca d'agua aparece discreta atras do card de login.
+- `npm test` segue `63/63` (mudanca so de frontend, suite de backend nao foi afetada).
+
 ## Validacoes locais recentes
 
 - `npm test` passou com `63/63` em `05/08/2026` apos a automacao de pendencias (`16` testes novos de regra + `3` de endpoint).

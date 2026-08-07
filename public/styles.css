@@ -37,16 +37,16 @@ body {
     linear-gradient(180deg, #f7fbff 0%, var(--bg) 100%);
 }
 
-body::before {
-  content: "LC TRANSPORTES";
+.watermark-logo {
   position: fixed;
-  inset: auto -120px 40px auto;
-  font-size: clamp(4.5rem, 14vw, 10rem);
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  color: rgba(11, 90, 168, 0.05);
-  transform: rotate(-12deg);
+  right: -6%;
+  bottom: -6%;
+  width: min(60vw, 620px);
+  max-width: none;
+  border-radius: 50%;
+  opacity: 0.05;
   pointer-events: none;
+  user-select: none;
   z-index: 0;
 }
 
@@ -436,6 +436,50 @@ button:disabled,
 .action-icon {
   width: 24px;
   height: 24px;
+}
+
+.admin-tabs {
+  display: flex;
+  gap: 6px;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 5px;
+  margin-bottom: 18px;
+}
+
+.admin-tab {
+  flex: 1;
+  text-align: center;
+  padding: 10px 8px;
+  border: none;
+  border-radius: 12px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--muted);
+  background: transparent;
+  position: relative;
+  cursor: pointer;
+}
+
+.admin-tab.active {
+  background: var(--green);
+  color: #ffffff;
+}
+
+.tab-dot {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 0 2px var(--surface-strong);
+}
+
+.admin-tab.active .tab-dot {
+  box-shadow: 0 0 0 2px var(--green);
 }
 
 .journey-card {
@@ -1288,8 +1332,13 @@ th {
 }
 
 @media (max-width: 640px) {
-  body::before {
-    display: none;
+  .watermark-logo {
+    width: 80vw;
+  }
+
+  .admin-tab {
+    font-size: 0.72rem;
+    padding: 9px 4px;
   }
 
   .shell {
