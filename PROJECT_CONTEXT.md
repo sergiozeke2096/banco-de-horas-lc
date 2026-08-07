@@ -283,6 +283,17 @@ Trabalho feito **apenas localmente** ainda, sem publicar na VPS. Sao mudancas so
 - 4 testes novos de integracao (motorista + busca, edicao completa, 404/edicao invalida preserva dados antigos, funcionario sem acesso). Suite: `77/77`.
 - Dados reais re-seedados com motorista: rotas com nome "Leandro - X" / "Ernandes LC - X" tiveram o motorista extraido do prefixo (script atualizado em `seed-real-routes.js` no scratchpad, nao versionado). As 4 rotas de hub e a "Coletas destacadas" ficaram sem motorista, como nos prints originais.
 
+## Bug grave corrigido em 07/08/2026: edicao de rota apagava enderecos de outras cidades
+
+- O usuario relatou que editar a "rota de Guabiruba" (encontrada pela busca por cidade) apagou paradas de outras cidades sem querer. Causa raiz confirmada lendo o codigo: o botao "Editar rota" carregava a rota inteira (`GET /api/admin/routes/:routeId`, todas as paradas, todas as cidades misturadas) num textarea unico; salvar fazia um `PUT` que **substituia todas as paradas da rota**. Como uma rota pode ter paradas de mais de uma cidade (ex.: a rota "Leandro - Guabiruba" tem uma parada em Brusque misturada), editar via a busca filtrada por Guabiruba escondia essa parada de Brusque do usuario, mas ela ainda fazia parte do payload de substituicao — se o texto colado de volta nao incluisse aquela linha, ela sumia.
+- Correcao: edicao agora e **por parada individual**, nunca por rota inteira.
+  - Novos endpoints: `PUT /api/admin/routes/:routeId/stops/:stopId` (edita so essa parada; exige cidade+endereco; 404 se a parada nao pertencer aquela rota) e `DELETE /api/admin/routes/:routeId/stops/:stopId` (exclui so essa parada).
+  - O antigo `PUT /api/admin/routes/:routeId` (substituir rota inteira) continua existindo no backend e testado, mas **nao tem mais nenhum caminho na UI que o chame** — nao e mais possivel disparar esse comportamento perigoso pela tela.
+  - Novo modal `#routeStopEditDialog` em [public/index.html](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/public/index.html): campos empilhados Operacao/Cidade/Cliente/Endereco/Contato de uma unica parada, com link "Ver no Google Maps" (`https://www.google.com/maps/search/?api=1&query=ENDERECO_URLENCODED`, atualizado ao vivo conforme o endereco e digitado) e botao "Excluir parada" (so essa, com confirmacao).
+  - O botao "Editar" tanto na busca por cidade (endereco avulso) quanto na busca por motorista (dentro da lista de cada rota, agora com um botao por linha) abre esse modal focado. O formulario de "Cadastrar rota" (paste em lote) voltou a ser so para criar rotas novas.
+- 5 testes novos de integracao confirmando que editar/excluir uma parada nao mexe nas outras da mesma rota, validacao de campos obrigatorios, 404 para parada de outra rota, e bloqueio para funcionario. Suite: `82/82`.
+- Validado no navegador reproduzindo o cenario exato do bug: busca por Guabiruba (5 enderecos, sem a parada de Brusque misturada), edicao de um deles, e confirmacao de que os outros 4 de Guabiruba **e** a parada de Brusque da mesma rota continuam intactos depois de salvar.
+
 ## Validacoes locais recentes
 
 - `npm test` passou com `63/63` em `05/08/2026` apos a automacao de pendencias (`16` testes novos de regra + `3` de endpoint).

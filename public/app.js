@@ -15,7 +15,6 @@ const state = {
   weekSummary: null,
   adminTab: "overview",
   showRouteRegisterForm: false,
-  editingRouteId: null,
   routeCities: [],
   routeSearchCity: "",
   routeStopResults: [],
@@ -103,9 +102,6 @@ const adminTabRotas = document.querySelector("#adminTabRotas");
 const adminOverviewDot = document.querySelector("#adminOverviewDot");
 const toggleRouteRegisterButton = document.querySelector("#toggleRouteRegisterButton");
 const routeRegisterForm = document.querySelector("#routeRegisterForm");
-const routeFormTitle = document.querySelector("#routeFormTitle");
-const routeEditingHint = document.querySelector("#routeEditingHint");
-const routeSubmitButton = document.querySelector("#routeSubmitButton");
 const registerRouteDriver = document.querySelector("#registerRouteDriver");
 const registerRouteName = document.querySelector("#registerRouteName");
 const registerRouteStops = document.querySelector("#registerRouteStops");
@@ -120,6 +116,17 @@ const routeDriverSuggestions = document.querySelector("#routeDriverSuggestions")
 const searchRouteDriverButton = document.querySelector("#searchRouteDriverButton");
 const clearRouteDriverSearchButton = document.querySelector("#clearRouteDriverSearchButton");
 const routeDriverResults = document.querySelector("#routeDriverResults");
+const routeStopEditDialog = document.querySelector("#routeStopEditDialog");
+const routeStopEditForm = document.querySelector("#routeStopEditForm");
+const routeStopEditOperation = document.querySelector("#routeStopEditOperation");
+const routeStopEditCity = document.querySelector("#routeStopEditCity");
+const routeStopEditClient = document.querySelector("#routeStopEditClient");
+const routeStopEditAddress = document.querySelector("#routeStopEditAddress");
+const routeStopEditMapsLink = document.querySelector("#routeStopEditMapsLink");
+const routeStopEditContact = document.querySelector("#routeStopEditContact");
+const routeStopEditMessage = document.querySelector("#routeStopEditMessage");
+const routeStopEditDeleteButton = document.querySelector("#routeStopEditDeleteButton");
+const routeStopEditCancelButton = document.querySelector("#routeStopEditCancelButton");
 const recordsSection = document.querySelector("#recordsSection");
 const alertsPanel = document.querySelector("#alertsPanel");
 const alertsTitle = document.querySelector("#alertsTitle");
@@ -1686,18 +1693,7 @@ function renderRouteRegisterForm() {
   }
 
   routeRegisterForm.classList.toggle("hidden", !state.showRouteRegisterForm);
-
-  const isEditing = Boolean(state.editingRouteId);
   toggleRouteRegisterButton.textContent = state.showRouteRegisterForm ? "Cancelar" : "Nova rota";
-  if (routeFormTitle) {
-    routeFormTitle.textContent = isEditing ? "Editar rota" : "Cadastrar rota";
-  }
-  if (routeSubmitButton) {
-    routeSubmitButton.textContent = isEditing ? "Salvar edicao" : "Salvar rota";
-  }
-  if (routeEditingHint) {
-    routeEditingHint.classList.toggle("hidden", !isEditing);
-  }
 }
 
 function handleToggleRouteRegisterForm() {
@@ -1708,9 +1704,6 @@ function handleToggleRouteRegisterForm() {
   const wasOpen = state.showRouteRegisterForm;
   state.showRouteRegisterForm = !wasOpen;
   if (wasOpen) {
-    // Fechar cancela qualquer edicao em andamento, para nao deixar o
-    // formulario "preso" em modo de edicao na proxima vez que abrir.
-    state.editingRouteId = null;
     routeRegisterForm?.reset();
   }
   renderRouteRegisterForm();
@@ -1787,14 +1780,6 @@ function parseRouteStopsInput(rawText) {
     .filter((stop) => stop.city && stop.address);
 }
 
-// Caminho inverso do parse acima, usado para pre-preencher o formulario ao
-// editar uma rota existente com o mesmo formato que o admin usa para colar.
-function stopsToTextareaValue(stops) {
-  return stops
-    .map((stop) => [stop.operation, stop.city, stop.client, stop.address, stop.contact].join(" | "))
-    .join("\n");
-}
-
 async function handleRouteRegister(event) {
   event.preventDefault();
 
@@ -1810,21 +1795,13 @@ async function handleRouteRegister(event) {
     stops,
   };
 
-  const isEditing = Boolean(state.editingRouteId);
-
   try {
-    const data = isEditing
-      ? await api(`/api/admin/routes/${state.editingRouteId}`, {
-        method: "PUT",
-        body: JSON.stringify(payload),
-      })
-      : await api("/api/admin/routes", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+    const data = await api("/api/admin/routes", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
 
     routeRegisterForm.reset();
-    state.editingRouteId = null;
     state.showRouteRegisterForm = false;
     renderRouteRegisterForm();
     await loadRouteCities();
@@ -1835,33 +1812,142 @@ async function handleRouteRegister(event) {
     if (state.routeSearchDriver) {
       await handleSearchRouteDrivers();
     }
-    // Mensagem de sucesso e a ultima coisa, depois de qualquer refresh
-    // automatico das buscas (que tambem mexem nessa mensagem).
-    setRouteManagerMessage(
-      isEditing
-        ? `Rota "${data.route.name}" atualizada com ${data.route.stopCount} parada(s).`
-        : `Rota "${data.route.name}" cadastrada com ${data.route.stopCount} parada(s).`
-    );
+    setRouteManagerMessage(`Rota "${data.route.name}" cadastrada com ${data.route.stopCount} parada(s).`);
   } catch (error) {
     setRouteManagerMessage(error.message, true);
   }
 }
 
-async function handleEditRoute(routeId) {
-  try {
-    const data = await api(`/api/admin/routes/${routeId}`);
-    const route = data.route;
-    registerRouteDriver.value = route.driver || "";
-    registerRouteName.value = route.name || "";
-    registerRouteStops.value = stopsToTextareaValue(route.stops || []);
-    state.editingRouteId = route.id;
-    state.showRouteRegisterForm = true;
-    setRouteManagerMessage("");
-    renderRouteRegisterForm();
-    routeRegisterForm?.scrollIntoView({ block: "start", behavior: "smooth" });
-  } catch (error) {
-    setRouteManagerMessage(error.message, true);
+// Busca a parada em qualquer uma das duas listas de resultado (por cidade ou
+// por motorista) ja carregadas em memoria, sem precisar de uma chamada nova
+// ao servidor so para abrir o modal de edicao.
+function findStopInResults(stopId) {
+  const key = String(stopId);
+  const fromCitySearch = state.routeStopResults.find((stop) => String(stop.id) === key);
+  if (fromCitySearch) {
+    return fromCitySearch;
   }
+
+  for (const route of state.routeDriverResults) {
+    const stop = (route.stops || []).find((item) => String(item.id) === key);
+    if (stop) {
+      return stop;
+    }
+  }
+
+  return null;
+}
+
+function updateRouteStopEditMapsLink() {
+  if (!routeStopEditMapsLink) {
+    return;
+  }
+
+  const address = routeStopEditAddress.value.trim();
+  if (!address) {
+    routeStopEditMapsLink.classList.add("hidden");
+    return;
+  }
+
+  routeStopEditMapsLink.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+  routeStopEditMapsLink.classList.remove("hidden");
+}
+
+function setRouteStopEditMessage(message, isError = false) {
+  if (!routeStopEditMessage) {
+    return;
+  }
+
+  routeStopEditMessage.textContent = message;
+  routeStopEditMessage.style.color = isError ? "#a33f33" : "";
+}
+
+// Abre o modal focado em UMA parada so. Nunca carrega as outras paradas da
+// mesma rota, entao salvar aqui nunca pode apagar endereco de outra cidade
+// por engano (era exatamente isso que acontecia no fluxo antigo).
+function openRouteStopEditDialog(routeId, stopId) {
+  const stop = findStopInResults(stopId);
+  if (!stop) {
+    return;
+  }
+
+  routeStopEditForm.dataset.routeId = routeId;
+  routeStopEditForm.dataset.stopId = stopId;
+  routeStopEditOperation.value = stop.operation || "";
+  routeStopEditCity.value = stop.city || "";
+  routeStopEditClient.value = stop.client || "";
+  routeStopEditAddress.value = stop.address || "";
+  routeStopEditContact.value = stop.contact || "";
+  updateRouteStopEditMapsLink();
+  setRouteStopEditMessage("");
+  routeStopEditDialog.showModal();
+}
+
+function handleRouteResultsEditClick(event) {
+  const editButton = event.target.closest("[data-edit-stop]");
+  if (!editButton) {
+    return;
+  }
+
+  openRouteStopEditDialog(editButton.dataset.editRoute, editButton.dataset.editStop);
+}
+
+async function handleRouteStopEditSubmit(event) {
+  event.preventDefault();
+
+  const { routeId, stopId } = routeStopEditForm.dataset;
+  const payload = {
+    operation: routeStopEditOperation.value.trim(),
+    city: routeStopEditCity.value.trim(),
+    client: routeStopEditClient.value.trim(),
+    address: routeStopEditAddress.value.trim(),
+    contact: routeStopEditContact.value.trim(),
+  };
+
+  try {
+    await api(`/api/admin/routes/${routeId}/stops/${stopId}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+    routeStopEditDialog.close();
+    if (state.routeSearchCity) {
+      await handleSearchRoutes();
+    }
+    if (state.routeSearchDriver) {
+      await handleSearchRouteDrivers();
+    }
+    await loadRouteCities();
+    setRouteManagerMessage("Parada atualizada com sucesso.");
+  } catch (error) {
+    setRouteStopEditMessage(error.message, true);
+  }
+}
+
+async function handleRouteStopEditDelete() {
+  const { routeId, stopId } = routeStopEditForm.dataset;
+  const confirmed = window.confirm("Excluir esta parada? As outras paradas da rota nao sao afetadas.");
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await api(`/api/admin/routes/${routeId}/stops/${stopId}`, { method: "DELETE" });
+    routeStopEditDialog.close();
+    if (state.routeSearchCity) {
+      await handleSearchRoutes();
+    }
+    if (state.routeSearchDriver) {
+      await handleSearchRouteDrivers();
+    }
+    await loadRouteCities();
+    setRouteManagerMessage("Parada excluida com sucesso.");
+  } catch (error) {
+    setRouteStopEditMessage(error.message, true);
+  }
+}
+
+function handleRouteStopEditCancel() {
+  routeStopEditDialog.close();
 }
 
 function renderRoutesResults() {
@@ -1901,7 +1987,7 @@ function renderRoutesResults() {
           </div>
           <div class="route-source-row">
             <p class="route-source">Rota: ${escapeHtml(stop.routeName || "-")}</p>
-            <button type="button" class="ghost table-action" data-edit-route="${stop.routeId}">Editar rota</button>
+            <button type="button" class="ghost table-action" data-edit-route="${stop.routeId}" data-edit-stop="${stop.id}">Editar</button>
           </div>
         </article>
       `;
@@ -1957,7 +2043,12 @@ function renderRouteDriverResults() {
           const opBadge = stop.operation ? `<span class="route-op-badge">${escapeHtml(stop.operation)}</span>` : "";
           const clientPart = stop.client ? `${escapeHtml(stop.client)} - ` : "";
           const contactPart = stop.contact ? ` - Contato: ${escapeHtml(stop.contact)}` : "";
-          return `<li class="route-stops-item">${opBadge}${clientPart}${escapeHtml(stop.city)}, ${escapeHtml(stop.address)}${contactPart}</li>`;
+          return `
+            <li class="route-stops-item">
+              <span class="route-stops-item-text">${opBadge}${clientPart}${escapeHtml(stop.city)}, ${escapeHtml(stop.address)}${contactPart}</span>
+              <button type="button" class="ghost table-action" data-edit-route="${route.id}" data-edit-stop="${stop.id}">Editar</button>
+            </li>
+          `;
         })
         .join("");
 
@@ -1967,9 +2058,6 @@ function renderRouteDriverResults() {
             <div>
               <h4 class="route-name">${escapeHtml(route.name)}</h4>
               <p class="route-meta">Motorista: ${escapeHtml(route.driver || "-")} - ${route.stopCount} parada${route.stopCount === 1 ? "" : "s"} - ${escapeHtml(formatCreatedAt(route.createdAt))}</p>
-            </div>
-            <div class="route-card-actions">
-              <button type="button" class="ghost table-action" data-edit-route="${route.id}">Editar</button>
             </div>
           </div>
           <ul class="route-stops-list">${stopsHtml}</ul>
@@ -2003,15 +2091,6 @@ function handleClearRouteDriverSearch() {
   state.routeDriverResults = [];
   setRouteManagerMessage("");
   renderRouteDriverResults();
-}
-
-function handleRouteResultsEditClick(event) {
-  const editButton = event.target.closest("[data-edit-route]");
-  if (!editButton) {
-    return;
-  }
-
-  handleEditRoute(editButton.dataset.editRoute);
 }
 
 function renderSession() {
@@ -2422,13 +2501,13 @@ async function handleLogout() {
   state.vehicleManageSearchApplied = "";
   state.adminTab = "overview";
   state.showRouteRegisterForm = false;
-  state.editingRouteId = null;
   state.routeCities = [];
   state.routeSearchCity = "";
   state.routeStopResults = [];
   state.routeDrivers = [];
   state.routeSearchDriver = "";
   state.routeDriverResults = [];
+  routeStopEditDialog?.close();
   if (routeCitySearchInput) {
     routeCitySearchInput.value = "";
   }
@@ -3498,6 +3577,11 @@ bindEvent(recordEditForm, "submit", handleRecordEditSubmit);
 bindEvent(recordEditCancelButton, "click", handleRecordEditCancel);
 bindEvent(recordEditDeleteButton, "click", handleRecordDelete);
 bindEvent(recordEditDialog, "cancel", handleRecordEditCancel);
+bindEvent(routeStopEditForm, "submit", handleRouteStopEditSubmit);
+bindEvent(routeStopEditDeleteButton, "click", handleRouteStopEditDelete);
+bindEvent(routeStopEditCancelButton, "click", handleRouteStopEditCancel);
+bindEvent(routeStopEditDialog, "cancel", handleRouteStopEditCancel);
+bindEvent(routeStopEditAddress, "input", updateRouteStopEditMapsLink);
 bindEvent(employeeManageSearchInput, "keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();

@@ -913,12 +913,6 @@ button:disabled,
   font-size: 0.8rem;
 }
 
-.route-editing-hint {
-  margin: 4px 0 0;
-  color: var(--gold);
-  font-weight: 700;
-}
-
 .route-card-actions {
   display: flex;
   gap: 8px;
@@ -934,6 +928,10 @@ button:disabled,
 }
 
 .route-stops-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 8px 12px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.72);
@@ -941,8 +939,26 @@ button:disabled,
   font-size: 0.85rem;
 }
 
+.route-stops-item-text {
+  flex: 1;
+  min-width: 0;
+}
+
 .route-stops-item .route-op-badge {
   margin: 0 8px 0 0;
+}
+
+.route-stop-maps-link {
+  display: inline-flex;
+  margin: -8px 0 0;
+  color: var(--blue);
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.route-stop-maps-link:hover {
+  text-decoration: underline;
 }
 
 .employees-table {

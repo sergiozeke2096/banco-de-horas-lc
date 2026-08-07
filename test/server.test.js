@@ -2163,3 +2163,131 @@ test("funcionario nao consegue listar motoristas nem editar rota", async () => {
     stops: [{ city: "Joinville", address: "Rua A" }],
   })).status, 403);
 });
+
+test("admin edita uma unica parada sem afetar as demais paradas da mesma rota", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+
+  const createResponse = await adminAgent.post("/api/admin/routes").send({
+    name: "Rota mista",
+    driver: "Leandro",
+    stops: [
+      { operation: "Minidrop", city: "Guabiruba", client: "SC-W-MD104", address: "R. Brusque, 712", contact: "111" },
+      { operation: "Pick-up", city: "Brusque", client: "Bouton", address: "Rua do Cedro, 1181", contact: "222" },
+      { operation: "Temu", city: "Guabiruba", client: "LFC Comercio", address: "Rua Fabio, 252", contact: "333" },
+    ],
+  });
+  const routeId = createResponse.body.route.id;
+  const guabirubaStopId = createResponse.body.route.stops[0].id;
+
+  const updateResponse = await adminAgent.put(`/api/admin/routes/${routeId}/stops/${guabirubaStopId}`).send({
+    operation: "Minidrop",
+    city: "Guabiruba",
+    client: "SC-W-MD104",
+    address: "R. Brusque, 712 - Centro (endereco corrigido)",
+    contact: "47999990000",
+  });
+  assert.equal(updateResponse.status, 200);
+  assert.equal(updateResponse.body.stop.address, "R. Brusque, 712 - Centro (endereco corrigido)");
+  assert.equal(updateResponse.body.stop.contact, "47999990000");
+
+  const detailResponse = await adminAgent.get(`/api/admin/routes/${routeId}`);
+  assert.equal(detailResponse.body.route.stops.length, 3);
+  assert.equal(detailResponse.body.route.stops[1].city, "Brusque");
+  assert.equal(detailResponse.body.route.stops[1].address, "Rua do Cedro, 1181");
+  assert.equal(detailResponse.body.route.stops[2].city, "Guabiruba");
+  assert.equal(detailResponse.body.route.stops[2].client, "LFC Comercio");
+
+  const brusqueSearch = await adminAgent.get("/api/admin/routes").query({ city: "Brusque" });
+  assert.equal(brusqueSearch.body.stops.length, 1);
+  assert.equal(brusqueSearch.body.stops[0].address, "Rua do Cedro, 1181");
+});
+
+test("editar parada exige cidade e endereco, e edicao invalida nao apaga a parada", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+
+  const createResponse = await adminAgent.post("/api/admin/routes").send({
+    name: "Rota para validacao",
+    stops: [{ city: "Joinville", address: "Rua Original, 1" }],
+  });
+  const routeId = createResponse.body.route.id;
+  const stopId = createResponse.body.route.stops[0].id;
+
+  const invalidResponse = await adminAgent.put(`/api/admin/routes/${routeId}/stops/${stopId}`).send({
+    city: "",
+    address: "Rua Nova",
+  });
+  assert.equal(invalidResponse.status, 400);
+
+  const detailResponse = await adminAgent.get(`/api/admin/routes/${routeId}`);
+  assert.equal(detailResponse.body.route.stops[0].address, "Rua Original, 1");
+});
+
+test("editar ou excluir parada de outra rota devolve 404", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+
+  const routeA = await adminAgent.post("/api/admin/routes").send({
+    name: "Rota A",
+    stops: [{ city: "Joinville", address: "Rua A" }],
+  });
+  const routeB = await adminAgent.post("/api/admin/routes").send({
+    name: "Rota B",
+    stops: [{ city: "Joinville", address: "Rua B" }],
+  });
+  const stopIdFromRouteA = routeA.body.route.stops[0].id;
+  const routeBId = routeB.body.route.id;
+
+  const updateResponse = await adminAgent.put(`/api/admin/routes/${routeBId}/stops/${stopIdFromRouteA}`).send({
+    city: "Joinville",
+    address: "Tentativa invalida",
+  });
+  assert.equal(updateResponse.status, 404);
+
+  const deleteResponse = await adminAgent.delete(`/api/admin/routes/${routeBId}/stops/${stopIdFromRouteA}`);
+  assert.equal(deleteResponse.status, 404);
+});
+
+test("admin exclui uma unica parada sem apagar as demais da rota", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+
+  const createResponse = await adminAgent.post("/api/admin/routes").send({
+    name: "Rota com duplicata",
+    stops: [
+      { city: "Blumenau", client: "VITA COMERCIO", address: "Rua Benjamin Constant, 1941" },
+      { city: "Blumenau", client: "VITA COMERCIO", address: "Rua Benjamin Constant, 1941" },
+    ],
+  });
+  const routeId = createResponse.body.route.id;
+  const duplicateStopId = createResponse.body.route.stops[1].id;
+
+  const deleteResponse = await adminAgent.delete(`/api/admin/routes/${routeId}/stops/${duplicateStopId}`);
+  assert.equal(deleteResponse.status, 200);
+
+  const detailResponse = await adminAgent.get(`/api/admin/routes/${routeId}`);
+  assert.equal(detailResponse.body.route.stops.length, 1);
+});
+
+test("funcionario nao consegue editar nem excluir parada individual", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  await registerEmployee(adminAgent, "9906", "Sem acesso a edicao de parada");
+
+  const createResponse = await adminAgent.post("/api/admin/routes").send({
+    name: "Rota protegida",
+    stops: [{ city: "Joinville", address: "Rua A" }],
+  });
+  const routeId = createResponse.body.route.id;
+  const stopId = createResponse.body.route.stops[0].id;
+
+  const employeeAgent = request.agent(app);
+  await login(employeeAgent, "9906", "senha-funcionario");
+
+  assert.equal((await employeeAgent.put(`/api/admin/routes/${routeId}/stops/${stopId}`).send({
+    city: "Joinville",
+    address: "Tentativa",
+  })).status, 403);
+  assert.equal((await employeeAgent.delete(`/api/admin/routes/${routeId}/stops/${stopId}`)).status, 403);
+});

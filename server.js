@@ -1225,6 +1225,66 @@ async function insertRouteStops(routeId, stops) {
   return insertedStops;
 }
 
+async function getRouteStopById(stopId) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("route_stops")
+        .select("*")
+        .eq("id", stopId)
+        .maybeSingle()
+    );
+  }
+
+  return localRouteStops.find((stop) => isSameEntityId(stop.id, stopId)) || null;
+}
+
+// Edita uma unica parada, sem tocar nas outras da mesma rota. E o caminho
+// seguro: editar so o que a busca por cidade mostrou, nunca a rota inteira
+// (que pode ter paradas de outras cidades misturadas).
+async function updateRouteStop(stopId, fields) {
+  const payload = {
+    operation: String(fields.operation || "").trim(),
+    city: String(fields.city).trim(),
+    client: String(fields.client || "").trim(),
+    address: String(fields.address).trim(),
+    contact: String(fields.contact || "").trim(),
+  };
+
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("route_stops")
+        .update(payload)
+        .eq("id", stopId)
+        .select("*")
+        .maybeSingle()
+    );
+  }
+
+  const stop = localRouteStops.find((item) => isSameEntityId(item.id, stopId));
+  if (!stop) {
+    return null;
+  }
+
+  Object.assign(stop, payload);
+  return stop;
+}
+
+async function deleteRouteStopById(stopId) {
+  if (storageMode === "supabase") {
+    const { error } = await supabase.from("route_stops").delete().eq("id", stopId);
+    if (error) {
+      throw error;
+    }
+    return true;
+  }
+
+  const before = localRouteStops.length;
+  localRouteStops = localRouteStops.filter((stop) => !isSameEntityId(stop.id, stopId));
+  return localRouteStops.length !== before;
+}
+
 async function deleteRoute(routeId) {
   if (storageMode === "supabase") {
     const { error } = await supabase.from("routes").delete().eq("id", routeId);
@@ -2046,6 +2106,53 @@ app.put("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) 
   await deleteRouteStopsForRoute(existingRoute.id);
   const insertedStops = await insertRouteStops(existingRoute.id, parsed.stops);
   return res.json({ route: serializeRoute(updatedRoute, insertedStops) });
+}));
+
+// Edicao focada em uma unica parada, para corrigir um endereco/contato sem
+// risco de mexer nas demais paradas da mesma rota (que podem ser de outra
+// cidade). E o caminho usado pelo botao "Editar" na busca por cidade/motorista.
+app.put("/api/admin/routes/:routeId/stops/:stopId", requireAdmin, asyncRoute(async (req, res) => {
+  const route = await getRouteById(req.params.routeId);
+  if (!route) {
+    return res.status(404).json({ error: "Rota nao encontrada." });
+  }
+
+  const existingStop = await getRouteStopById(req.params.stopId);
+  if (!existingStop || !isSameEntityId(existingStop.route_id, route.id)) {
+    return res.status(404).json({ error: "Parada nao encontrada nesta rota." });
+  }
+
+  const { operation, city, client, address, contact } = req.body || {};
+  const normalizedCity = String(city || "").trim();
+  const normalizedAddress = String(address || "").trim();
+
+  if (!normalizedCity || !normalizedAddress) {
+    return res.status(400).json({ error: "Informe cidade e endereco para a parada." });
+  }
+
+  const updatedStop = await updateRouteStop(existingStop.id, {
+    operation,
+    city: normalizedCity,
+    client,
+    address: normalizedAddress,
+    contact,
+  });
+  return res.json({ stop: serializeRouteStop(updatedStop, route) });
+}));
+
+app.delete("/api/admin/routes/:routeId/stops/:stopId", requireAdmin, asyncRoute(async (req, res) => {
+  const route = await getRouteById(req.params.routeId);
+  if (!route) {
+    return res.status(404).json({ error: "Rota nao encontrada." });
+  }
+
+  const existingStop = await getRouteStopById(req.params.stopId);
+  if (!existingStop || !isSameEntityId(existingStop.route_id, route.id)) {
+    return res.status(404).json({ error: "Parada nao encontrada nesta rota." });
+  }
+
+  await deleteRouteStopById(existingStop.id);
+  return res.json({ ok: true });
 }));
 
 app.delete("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) => {
