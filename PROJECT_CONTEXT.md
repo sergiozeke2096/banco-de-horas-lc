@@ -322,6 +322,27 @@ Trabalho feito **apenas localmente** ainda, sem publicar na VPS. Sao mudancas so
 - Nada mais pendente de publicar no momento. Tudo do dia `05/08/2026` (fila offline, dashboard, release assinado `1.1.7`, auto-update silencioso, cache offline de leitura) esta em producao e o `latest.json` ja aponta pro `1.1.7`.
 - Recomendado testar manualmente em navegador/APK real o auto-update silencioso e o cache offline de leitura quando der oportunidade (so foi validado por teste automatizado + checagem estatica ate agora, sem navegador real neste ambiente).
 
+## Suporte a iOS (08/08/2026)
+
+- Adicionada a plataforma iOS via Capacitor (`ios/`, `npm install @capacitor/ios`, `npx cap add ios`), seguindo o mesmo padrao ja usado no Android (`android/`) — o app iOS tambem so carrega a URL de producao numa WebView, sem empacotar HTML/JS/CSS localmente.
+- [capacitor.config.ts](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/capacitor.config.ts): `appendUserAgent` movido pra dentro dos blocos `android`/`ios` (cada plataforma com o seu: `LCAndroidShell/1.1.7` e `LCiOSShell/1.0.0`). Nova env var opcional `IOS_APP_URL` (default = mesmo valor de `ANDROID_APP_URL`).
+- `public/app.js`: `isIOSShell()`/`isUnconfiguredIOSShell()`/`showIOSShellNotice()` adicionados espelhando o padrao Android — **usados so pra mensagem de "app nao configurado"**, nunca ligados ao fluxo de auto-update (`checkForApkUpdate`/`startBackgroundApkDownload` continuam gatilhados exclusivamente por `isAndroidShell()`, porque a Apple proibe apps se auto-atualizarem fora da App Store).
+- Icones e splash gerados via `@capacitor/assets` (`npm run ios:assets`) a partir de `public/logo-lc.jpg` (fonte em baixa resolucao, 640x640 — recomendo trocar por uma logo em pelo menos 1024x1024 quando tiver uma, pra ficar mais nitido no icone da App Store).
+- `ios/App/App/Info.plist` ganhou `NSLocationWhenInUseUsageDescription` (unica permissao necessaria — o app so pede localizacao pontual ao bater ponto, sem rastreamento em segundo plano nem uso de camera).
+- Criada [public/privacy.html](public/privacy.html) (politica de privacidade, exigida pela App Store) — **rascunho meu, precisa da sua revisao e troca do e-mail de contato placeholder antes de submeter**.
+- Checklist completo do que falta (exige Mac + conta Apple Developer) documentado em [IOS_SETUP.md](IOS_SETUP.md).
+- Nada disso foi publicado na VPS ainda — os arquivos novos (`ios/`, `assets/`, `public/privacy.html`, scripts `ios:*`) sao so de preparacao/build local, nao precisam ir pro `server.js` da VPS. A unica mudanca que *tocaria* produção seria publicar `public/privacy.html` la quando for submeter o app (pra URL da politica de privacidade funcionar publicamente).
+
+## Bot de ponto por WhatsApp (08/08/2026)
+
+- Ideia do usuario: bater ponto mandando mensagem de WhatsApp. Pesquisei custo da API oficial da Meta (gratis ate 01/10/2026, depois passa a cobrar por mensagem) vs biblioteca nao-oficial Baileys (gratis, mas viola termos de uso do WhatsApp, risco real de ban do numero sem aviso). Usuario decidiu conscientemente ir pelo caminho gratuito/nao-oficial.
+- Refatoracao chave em [server.js](C:/Users/sergi/OneDrive/Área%20de%20Trabalho/trabalhos%20sistemas/Banco%20De%20Horas%20LC%20-%20app/server.js): extraida `createPunchRecord(user, payload)` de dentro do handler `POST /api/me/records` — agora e a fonte unica de validacao de ponto, reaproveitada tanto pela rota HTTP quanto pelo bot.
+- Novo modulo [lib/whatsapp-bot.js](lib/whatsapp-bot.js) (Baileys) com state machine por numero de telefone: palavra-chave fixa (Inicio/Parada/Retorno/Termino, sem IA livre) → placa+KM se precisar → localizacao compartilhada nativamente pelo WhatsApp → chama `createPunchRecord`.
+- Nova coluna `phone` em `users` ([supabase/schema.sql](supabase/schema.sql)) — **precisa rodar manualmente no Supabase antes de ativar** (mesmo processo das migracoes anteriores). Campo "Telefone (WhatsApp)" adicionado no cadastro/edicao de funcionario.
+- So liga com `WHATSAPP_ENABLED=true` no `.env` (desligado por padrao). Sessao autenticada fica em `.whatsapp-auth/` (gitignored, nunca versionar).
+- Checklist completo de ativacao (rodar migracao, cadastrar telefones, escanear QR code na VPS) em [WHATSAPP_SETUP.md](WHATSAPP_SETUP.md).
+- Nada disso foi ativado na VPS ainda — codigo pronto localmente, mas `WHATSAPP_ENABLED` continua `false`/ausente ate o usuario decidir ligar.
+
 ## Observacao para futuras sessoes
 
 - Se o usuario pedir para "subir", confirmar primeiro se e para VPS ou para APK.

@@ -189,6 +189,7 @@ const clearEmployeeSearchButton = document.querySelector("#clearEmployeeSearchBu
 const manageEmployeeIdInput = document.querySelector("#manageEmployeeId");
 const editEmployeeNameInput = document.querySelector("#editEmployeeName");
 const editEmployeeIdInput = document.querySelector("#editEmployeeId");
+const editEmployeePhoneInput = document.querySelector("#editEmployeePhone");
 const editPermissionsGroup = document.querySelector("#editPermissionsGroup");
 const cancelEmployeeEditButton = document.querySelector("#cancelEmployeeEditButton");
 const employeePasswordForm = document.querySelector("#employeePasswordForm");
@@ -254,6 +255,17 @@ function isAndroidShell() {
   return navigator.userAgent.includes("LCAndroidShell/");
 }
 
+// iOS nunca tem auto-update proprio (a Apple so permite atualizar via App
+// Store), entao isIOSShell() so serve pra ajustes cosmeticos/de mensagem —
+// nunca deve ser usado pra disparar o fluxo de checkForApkUpdate/download.
+function isIOSShell() {
+  return navigator.userAgent.includes("LCiOSShell/");
+}
+
+function isUnconfiguredIOSShell() {
+  return isIOSShell() && window.location.hostname === "localhost";
+}
+
 function showAndroidShellNotice() {
   if (loginSubmitButton) {
     loginSubmitButton.disabled = true;
@@ -264,6 +276,20 @@ function showAndroidShellNotice() {
   document.querySelector("#loginPassword")?.setAttribute("disabled", "disabled");
   setMessage(
     "Este APK precisa apontar para a versao online do sistema. Configure ANDROID_APP_URL, execute npm run android:sync e gere o app novamente.",
+    true
+  );
+}
+
+function showIOSShellNotice() {
+  if (loginSubmitButton) {
+    loginSubmitButton.disabled = true;
+    loginSubmitButton.textContent = "Configurar app iOS";
+  }
+
+  document.querySelector("#loginEmployeeId")?.setAttribute("disabled", "disabled");
+  document.querySelector("#loginPassword")?.setAttribute("disabled", "disabled");
+  setMessage(
+    "Este app precisa apontar para a versao online do sistema. Configure IOS_APP_URL, execute npm run ios:sync e gere o app novamente.",
     true
   );
 }
@@ -1215,6 +1241,9 @@ function renderEmployeeEditor() {
   manageEmployeeIdInput.value = employee.id;
   editEmployeeNameInput.value = employee.name;
   editEmployeeIdInput.value = employee.employeeId;
+  if (editEmployeePhoneInput) {
+    editEmployeePhoneInput.value = employee.phone || "";
+  }
 
   // Permissoes de um gestor so podem ser vistas/editadas pelo admin real,
   // mesmo que um outro gestor com acesso a Cadastros tenha aberto esse editor
@@ -2760,6 +2789,7 @@ async function handleRegister(event) {
     name: document.querySelector("#registerName").value.trim(),
     employeeId: document.querySelector("#registerEmployeeId").value.trim(),
     password: document.querySelector("#registerPassword").value.trim(),
+    phone: document.querySelector("#registerPhone")?.value.trim() || "",
   };
 
   if (state.user?.role === "admin" && registerRole?.value === "manager") {
@@ -3168,6 +3198,7 @@ async function handleEmployeeEditSubmit(event) {
   const payload = {
     name: editEmployeeNameInput.value.trim(),
     employeeId: editEmployeeIdInput.value.trim(),
+    phone: editEmployeePhoneInput?.value.trim() || "",
   };
 
   if (editPermissionsGroup && !editPermissionsGroup.classList.contains("hidden")) {
@@ -3957,6 +3988,8 @@ document.addEventListener("visibilitychange", handleAppVisible);
 
 if (isUnconfiguredAndroidShell()) {
   showAndroidShellNotice();
+} else if (isUnconfiguredIOSShell()) {
+  showIOSShellNotice();
 } else {
   loadSession().catch((error) => {
     setMessage(error.message, true);

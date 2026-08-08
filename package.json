@@ -14,7 +14,11 @@
     "android:deploy:update": "powershell -ExecutionPolicy Bypass -File scripts/deploy-android-update.ps1",
     "android:publish:update": "powershell -ExecutionPolicy Bypass -File scripts/publish-android-update.ps1",
     "android:sync": "npx cap sync android",
-    "android:open": "npx cap open android"
+    "android:open": "npx cap open android",
+    "ios:assets": "npx capacitor-assets generate --ios",
+    "ios:copy": "npx cap copy ios",
+    "ios:sync": "npx cap sync ios",
+    "ios:open": "npx cap open ios"
   },
   "keywords": [],
   "author": "",
@@ -27,7 +31,9 @@
     "@capacitor/android": "^8.2.0",
     "@capacitor/cli": "^8.2.0",
     "@capacitor/core": "^8.2.0",
+    "@capacitor/ios": "^8.5.0",
     "@supabase/supabase-js": "^2.98.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "bcryptjs": "^3.0.3",
     "dotenv": "^17.3.1",
     "exceljs": "^4.4.0",
@@ -35,6 +41,7 @@
     "express-session": "^1.19.0"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "supertest": "^7.2.2",
     "typescript": "^5.9.3"
   }

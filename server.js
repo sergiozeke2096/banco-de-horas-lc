@@ -7,6 +7,7 @@ const path = require("path");
 const { createClient } = require("@supabase/supabase-js");
 const { computeSummary, aggregateSummaryByEmployee, createWorkbook, getDailyWorkloadMinutes } = require("./lib/timecard-workbook");
 const { detectPendingAlerts, summarizeAlerts, DEFAULT_ALERT_THRESHOLDS } = require("./lib/pending-alerts");
+const { startWhatsAppBot } = require("./lib/whatsapp-bot");
 
 const LEGACY_ADMIN_NAME = "Lc tranporte";
 const SESSION_SECRET = process.env.SESSION_SECRET || "timecard-professional-secret";
@@ -71,6 +72,7 @@ function serializeManagedEmployee(user) {
     employeeId: user.employee_id,
     role: user.role,
     permissions: user.permissions || [],
+    phone: user.phone || "",
     createdAt: user.created_at,
   };
 }
@@ -164,6 +166,13 @@ function normalizeLoginIdentifier(value) {
   return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+// So os digitos, sem DDI/formatacao — assim "+55 47 99999-9999" e o numero
+// que o bot do WhatsApp recebe (ex.: "5547999999999@s.whatsapp.net") batem
+// no mesmo valor guardado em users.phone.
+function normalizePhoneNumber(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
 function getAdminLoginIdentifiers() {
   return Array.from(new Set(
     [getAdminConfig().name, LEGACY_ADMIN_NAME, "admin", "adm"]
@@ -202,7 +211,7 @@ async function validateSupabaseSchema() {
       table: "users",
       query: supabase
         .from("users")
-        .select("id, name, employee_id, password_hash, role, permissions", { head: true, count: "exact" })
+        .select("id, name, employee_id, password_hash, role, permissions, phone", { head: true, count: "exact" })
         .limit(1),
     },
     {
@@ -946,7 +955,24 @@ async function getUserById(userId) {
   return localUsers.find((user) => isSameEntityId(user.id, userId)) || null;
 }
 
-async function insertEmployeeUser(name, employeeId, passwordHash, role = "employee", permissions = []) {
+// Usado pelo bot de WhatsApp pra descobrir qual funcionario mandou a
+// mensagem, a partir do numero de telefone cadastrado no perfil dele.
+async function getUserByPhone(phone) {
+  const normalizedPhone = normalizePhoneNumber(phone);
+  if (!normalizedPhone) {
+    return null;
+  }
+
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase.from("users").select("*").eq("phone", normalizedPhone).maybeSingle()
+    );
+  }
+
+  return localUsers.find((user) => normalizePhoneNumber(user.phone) === normalizedPhone) || null;
+}
+
+async function insertEmployeeUser(name, employeeId, passwordHash, role = "employee", permissions = [], phone = null) {
   if (storageMode === "supabase") {
     return runQuery(
       supabase
@@ -957,6 +983,7 @@ async function insertEmployeeUser(name, employeeId, passwordHash, role = "employ
           password_hash: passwordHash,
           role,
           permissions,
+          phone,
         })
         .select("*")
         .single()
@@ -970,6 +997,7 @@ async function insertEmployeeUser(name, employeeId, passwordHash, role = "employ
     password_hash: passwordHash,
     role,
     permissions,
+    phone,
     created_at: new Date().toISOString(),
   };
   localUsers.push(user);
@@ -1900,7 +1928,7 @@ app.get("/api/auth/session", (req, res) => {
 });
 
 async function createEmployeeFromRequest(req, res) {
-  const { name, employeeId, password } = req.body;
+  const { name, employeeId, password, phone } = req.body;
 
   if (!name || !employeeId || !password) {
     return res.status(400).json({ error: "Nome, matricula e senha sao obrigatorios." });
@@ -1922,8 +1950,9 @@ async function createEmployeeFromRequest(req, res) {
     permissions = normalizePermissionsList(req.body.permissions);
   }
 
+  const normalizedPhone = normalizePhoneNumber(phone) || null;
   const passwordHash = bcrypt.hashSync(password, 10);
-  const user = await insertEmployeeUser(name, cleanEmployeeId, passwordHash, role, permissions);
+  const user = await insertEmployeeUser(name, cleanEmployeeId, passwordHash, role, permissions, normalizedPhone);
   return res.status(201).json({ user: serializeUser(user) });
 }
 
@@ -2272,6 +2301,10 @@ app.patch("/api/admin/employees/:employeeId", requireAdminSection("cadastros"), 
     employee_id: cleanEmployeeId,
   };
 
+  if (req.body.phone !== undefined) {
+    updates.phone = normalizePhoneNumber(req.body.phone) || null;
+  }
+
   // Permissoes de um gestor so podem ser alteradas pelo admin real.
   if (isRealAdmin && employee.role === "manager" && req.body.permissions !== undefined) {
     updates.permissions = normalizePermissionsList(req.body.permissions);
@@ -2476,28 +2509,28 @@ app.get("/api/me/summary", requireAuth, asyncRoute(async (req, res) => {
   });
 }));
 
-app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
-  const user = req.authUser;
-  if (!isPunchClockUser(user)) {
-    return res.status(403).json({ error: "Somente funcionarios registram ponto." });
-  }
-
-  const { action, latitude, longitude, locationLabel, recordedAt, localDate, localTime, vehiclePlate, vehicleKm, clientRequestId } = req.body;
+// Logica central de bater ponto, isolada da rota HTTP pra poder ser
+// reaproveitada pelo bot de WhatsApp (lib/whatsapp-bot.js) sem duplicar
+// nenhuma regra de negocio (sequencia de acoes, conflito de veiculo, etc.).
+// Devolve { status, body } no formato pronto pra virar resposta HTTP, mas
+// quem chama nao precisa estar dentro de uma rota Express.
+async function createPunchRecord(user, payload) {
+  const { action, latitude, longitude, locationLabel, recordedAt, localDate, localTime, vehiclePlate, vehicleKm, clientRequestId } = payload;
   const allowedActions = TIME_RECORD_ACTIONS;
 
   if (!allowedActions.includes(action)) {
-    return res.status(400).json({ error: "Acao de ponto invalida." });
+    return { status: 400, body: { error: "Acao de ponto invalida." } };
   }
 
   if (typeof latitude !== "number" || typeof longitude !== "number") {
-    return res.status(400).json({ error: "Ative a localizacao para registrar o ponto." });
+    return { status: 400, body: { error: "Ative a localizacao para registrar o ponto." } };
   }
 
   const normalizedClientRequestId = String(clientRequestId || "").trim() || null;
   if (normalizedClientRequestId) {
     const existingRecord = await findRecordByClientRequestId(normalizedClientRequestId);
     if (existingRecord) {
-      return res.status(200).json({ record: existingRecord });
+      return { status: 200, body: { record: existingRecord } };
     }
   }
 
@@ -2508,7 +2541,7 @@ app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
   const sequenceError = validateRecordSequence(userRecords, action, timestamp);
 
   if (sequenceError) {
-    return res.status(409).json({ error: sequenceError });
+    return { status: 409, body: { error: sequenceError } };
   }
 
   const vehicleContext = await buildVehicleContextForUser(user.id);
@@ -2529,7 +2562,7 @@ app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
   }
 
   if (!normalizedVehiclePlate || numericVehicleKm === null || Number.isNaN(numericVehicleKm)) {
-    return res.status(400).json({ error: "Informe a placa e o KM do veiculo." });
+    return { status: 400, body: { error: "Informe a placa e o KM do veiculo." } };
   }
 
   const registeredVehicle = await getVehicleByPlate(normalizedVehiclePlate);
@@ -2537,28 +2570,31 @@ app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
   const usageMap = buildVehicleUsageMap(activeAssignments);
 
   if (!registeredVehicle) {
-    return res.status(409).json({ error: "Selecione um veiculo cadastrado." });
+    return { status: 409, body: { error: "Selecione um veiculo cadastrado." } };
   }
 
   if (vehicleContext.activeJourney && vehicleContext.currentVehicle?.plate) {
     if (normalizedVehiclePlate !== vehicleContext.currentVehicle.plate) {
-      return res.status(409).json({
-        error: `Este funcionario esta com o veiculo ${vehicleContext.currentVehicle.plate} em uso. Use o botao Trocar veiculo para mudar.`,
-      });
+      return {
+        status: 409,
+        body: { error: `Este funcionario esta com o veiculo ${vehicleContext.currentVehicle.plate} em uso. Use o botao Trocar veiculo para mudar.` },
+      };
     }
   } else {
     const vehicleConflict = getVehicleUsageConflict(usageMap, normalizedVehiclePlate, user.id);
     if (vehicleConflict) {
-      return res.status(409).json({
-        error: `O veiculo ${normalizedVehiclePlate} ja esta em uso por ${vehicleConflict.employeeName} (${vehicleConflict.employeeId}).`,
-      });
+      return {
+        status: 409,
+        body: { error: `O veiculo ${normalizedVehiclePlate} ja esta em uso por ${vehicleConflict.employeeName} (${vehicleConflict.employeeId}).` },
+      };
     }
   }
 
   if (registeredVehicle && numericVehicleKm < Number(registeredVehicle.current_km ?? 0)) {
-    return res.status(409).json({
-      error: `O KM informado nao pode ser menor que o KM atual do veiculo (${registeredVehicle.current_km}).`,
-    });
+    return {
+      status: 409,
+      body: { error: `O KM informado nao pode ser menor que o KM atual do veiculo (${registeredVehicle.current_km}).` },
+    };
   }
 
   const record = await insertRecord(user, {
@@ -2581,7 +2617,17 @@ app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
     await updateVehicleCurrentKm(registeredVehicle.id, numericVehicleKm);
   }
 
-  return res.status(201).json({ record });
+  return { status: 201, body: { record } };
+}
+
+app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
+  const user = req.authUser;
+  if (!isPunchClockUser(user)) {
+    return res.status(403).json({ error: "Somente funcionarios registram ponto." });
+  }
+
+  const result = await createPunchRecord(user, req.body);
+  return res.status(result.status).json(result.body);
 }));
 
 app.post("/api/me/vehicle-transfers", requireAuth, asyncRoute(async (req, res) => {
@@ -2877,6 +2923,20 @@ async function start() {
   serverInstance = app.listen(PORT, () => {
     console.log(`Servidor iniciado em http://localhost:${PORT} usando modo ${storageMode}`);
   });
+
+  // Opt-in: so tenta ligar o bot de WhatsApp se WHATSAPP_ENABLED=true no
+  // .env, pra dev/teste local nunca tentar abrir uma conexao/QR code por
+  // padrao. Falha do bot nao derruba o servidor HTTP.
+  if (String(process.env.WHATSAPP_ENABLED || "").trim() === "true") {
+    startWhatsAppBot({
+      createPunchRecord,
+      getUserByPhone,
+      buildVehicleContextForUser,
+      canReuseCurrentVehicleForAction,
+    }).catch((error) => {
+      console.error("Falha ao iniciar o bot de WhatsApp:", error.message);
+    });
+  }
 
   return serverInstance;
 }

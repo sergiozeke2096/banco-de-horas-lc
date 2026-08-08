@@ -5,6 +5,7 @@ create table if not exists public.users (
   password_hash text not null,
   role text not null check (role in ('admin', 'employee', 'manager')),
   permissions text[] not null default '{}',
+  phone text,
   created_at timestamptz not null default now()
 );
 
@@ -74,6 +75,8 @@ create table if not exists public.route_stops (
 alter table public.users drop constraint if exists users_role_check;
 alter table public.users add constraint users_role_check check (role in ('admin', 'employee', 'manager'));
 alter table public.users add column if not exists permissions text[] not null default '{}';
+alter table public.users add column if not exists phone text;
+create index if not exists idx_users_phone on public.users (phone);
 
 alter table public.time_records add column if not exists vehicle_plate text;
 alter table public.time_records add column if not exists vehicle_km double precision;
