@@ -14,6 +14,7 @@ const state = {
   alertCounts: null,
   weekSummary: null,
   adminTab: "overview",
+  managerView: "punch",
   showRouteRegisterForm: false,
   routeCities: [],
   routeSearchCity: "",
@@ -21,8 +22,8 @@ const state = {
   routeDrivers: [],
   routeSearchDriver: "",
   routeDriverResults: [],
-  summaryCollapsed: false,
-  aggregatesCollapsed: false,
+  summaryCollapsed: true,
+  aggregatesCollapsed: true,
   alertsCollapsed: false,
   managedEmployeeId: "",
   showRegisterForm: false,
@@ -46,6 +47,12 @@ const formatters = {
   time: new Intl.DateTimeFormat("pt-BR", { timeStyle: "medium", timeZone: APP_TIME_ZONE }),
 };
 const ADMIN_RECORD_ACTIONS = ["Entrada", "Saida para almoco", "Retorno do almoco", "Saida"];
+const ADMIN_SECTIONS = [
+  { key: "overview", label: "Visao geral" },
+  { key: "registros", label: "Registros" },
+  { key: "cadastros", label: "Cadastros" },
+  { key: "rotas", label: "Rotas" },
+];
 const SHOW_EMPLOYEE_KM_FIELDS = false;
 
 const authPanel = document.querySelector("#authPanel");
@@ -67,6 +74,9 @@ const sessionTitle = document.querySelector("#sessionTitle");
 const sessionSubtitle = document.querySelector("#sessionSubtitle");
 const recordsTitle = document.querySelector("#recordsTitle");
 const recordsSubtitle = document.querySelector("#recordsSubtitle");
+const managerViewSwitch = document.querySelector("#managerViewSwitch");
+const managerViewPunchButton = document.querySelector("#managerViewPunchButton");
+const managerViewAdminButton = document.querySelector("#managerViewAdminButton");
 const locationStatus = document.querySelector("#locationStatus");
 const pendingPunchIndicator = document.querySelector("#pendingPunchIndicator");
 const pendingPunchErrors = document.querySelector("#pendingPunchErrors");
@@ -104,12 +114,15 @@ const toggleRouteRegisterButton = document.querySelector("#toggleRouteRegisterBu
 const routeRegisterForm = document.querySelector("#routeRegisterForm");
 const registerRouteDriver = document.querySelector("#registerRouteDriver");
 const registerRouteName = document.querySelector("#registerRouteName");
-const registerRouteStops = document.querySelector("#registerRouteStops");
+const routeStopsFieldList = document.querySelector("#routeStopsFieldList");
+const addRouteStopButton = document.querySelector("#addRouteStopButton");
+const routeStopFieldTemplate = document.querySelector("#routeStopFieldTemplate");
 const routeManagerMessage = document.querySelector("#routeManagerMessage");
 const routeCitySearchInput = document.querySelector("#routeCitySearchInput");
 const routeCitySuggestions = document.querySelector("#routeCitySuggestions");
 const searchRoutesButton = document.querySelector("#searchRoutesButton");
 const clearRouteSearchButton = document.querySelector("#clearRouteSearchButton");
+const addNewAddressButton = document.querySelector("#addNewAddressButton");
 const routesResults = document.querySelector("#routesResults");
 const routeDriverSearchInput = document.querySelector("#routeDriverSearchInput");
 const routeDriverSuggestions = document.querySelector("#routeDriverSuggestions");
@@ -127,6 +140,15 @@ const routeStopEditContact = document.querySelector("#routeStopEditContact");
 const routeStopEditMessage = document.querySelector("#routeStopEditMessage");
 const routeStopEditDeleteButton = document.querySelector("#routeStopEditDeleteButton");
 const routeStopEditCancelButton = document.querySelector("#routeStopEditCancelButton");
+const newAddressDialog = document.querySelector("#newAddressDialog");
+const newAddressForm = document.querySelector("#newAddressForm");
+const newAddressOperation = document.querySelector("#newAddressOperation");
+const newAddressCity = document.querySelector("#newAddressCity");
+const newAddressClient = document.querySelector("#newAddressClient");
+const newAddressAddress = document.querySelector("#newAddressAddress");
+const newAddressContact = document.querySelector("#newAddressContact");
+const newAddressMessage = document.querySelector("#newAddressMessage");
+const newAddressCancelButton = document.querySelector("#newAddressCancelButton");
 const recordsSection = document.querySelector("#recordsSection");
 const alertsPanel = document.querySelector("#alertsPanel");
 const alertsTitle = document.querySelector("#alertsTitle");
@@ -152,6 +174,9 @@ const loginForm = document.querySelector("#loginForm");
 const loginSubmitButton = loginForm?.querySelector('button[type="submit"]');
 const registerForm = document.querySelector("#registerForm");
 const toggleRegisterButton = document.querySelector("#toggleRegisterButton");
+const registerRoleBlock = document.querySelector("#registerRoleBlock");
+const registerRole = document.querySelector("#registerRole");
+const registerPermissionsGroup = document.querySelector("#registerPermissionsGroup");
 const logoutButton = document.querySelector("#logoutButton");
 const employeeAdminBody = document.querySelector("#employeeAdminBody");
 const employeeManagerMessage = document.querySelector("#employeeManagerMessage");
@@ -164,6 +189,7 @@ const clearEmployeeSearchButton = document.querySelector("#clearEmployeeSearchBu
 const manageEmployeeIdInput = document.querySelector("#manageEmployeeId");
 const editEmployeeNameInput = document.querySelector("#editEmployeeName");
 const editEmployeeIdInput = document.querySelector("#editEmployeeId");
+const editPermissionsGroup = document.querySelector("#editPermissionsGroup");
 const cancelEmployeeEditButton = document.querySelector("#cancelEmployeeEditButton");
 const employeePasswordForm = document.querySelector("#employeePasswordForm");
 const employeePasswordInput = document.querySelector("#employeePasswordInput");
@@ -676,7 +702,7 @@ function hasActiveAdminFilters() {
 }
 
 function shouldShowAdminSummary() {
-  return state.user?.role === "admin";
+  return hasSectionAccess("overview");
 }
 
 function formatElapsed(totalMs) {
@@ -812,9 +838,9 @@ function renderJourneyCard() {
     return;
   }
 
-  const isEmployee = state.user?.role === "employee";
-  journeyCard.classList.toggle("hidden", !isEmployee);
-  if (!isEmployee) {
+  const isPunchClock = isPunchClockRole();
+  journeyCard.classList.toggle("hidden", !isPunchClock);
+  if (!isPunchClock) {
     return;
   }
 
@@ -849,7 +875,7 @@ function renderJourneyCard() {
 }
 
 function renderActionButtons(allowedActions) {
-  if (state.user?.role !== "employee") {
+  if (!isPunchClockRole()) {
     return;
   }
 
@@ -934,12 +960,14 @@ function renderEmployeeTimeline() {
 function renderRecords() {
   recordsList.innerHTML = "";
 
-  if (state.user?.role === "admin" && !hasActiveAdminFilters()) {
+  const showAllView = isShowingAllRecordsView();
+
+  if (showAllView && !hasActiveAdminFilters()) {
     recordsList.innerHTML = '<p class="muted">Use os filtros para pesquisar registros e liberar a edicao administrativa.</p>';
     return;
   }
 
-  if (state.user?.role === "employee") {
+  if (!showAllView) {
     renderEmployeeTimeline();
     return;
   }
@@ -953,10 +981,7 @@ function renderRecords() {
 
   for (const record of visibleRecords) {
     const node = recordTemplate.content.cloneNode(true);
-    const title =
-      state.user.role === "admin"
-        ? `${record.employee_name} (${record.employee_id})`
-        : `${state.user.name} (${state.user.employeeId})`;
+    const title = `${record.employee_name} (${record.employee_id})`;
     const mapsUrl = createMapsUrl(record);
 
     node.querySelector(".record-title").textContent = title;
@@ -969,7 +994,7 @@ function renderRecords() {
     }
     node.querySelector(".record-action").textContent = formatActionLabel(record.action);
     const editButton = node.querySelector("[data-edit-record]");
-    if (state.user.role === "admin" && editButton) {
+    if (editButton) {
       editButton.dataset.editRecord = String(record.id);
       editButton.classList.remove("hidden");
     }
@@ -978,10 +1003,10 @@ function renderRecords() {
 }
 
 function renderEmployeeFilter() {
-  const isAdmin = state.user?.role === "admin";
-  exportActions.classList.toggle("hidden", !isAdmin);
+  const showAllView = isShowingAllRecordsView();
+  exportActions.classList.toggle("hidden", !showAllView);
 
-  if (!isAdmin) {
+  if (!showAllView) {
     recordsFilterPanel.classList.add("hidden");
     return;
   }
@@ -999,15 +1024,15 @@ function renderEmployeeVehicleContext() {
     return;
   }
 
-  const isEmployee = state.user?.role === "employee";
+  const isPunchClock = isPunchClockRole();
   const hasVehicles = state.vehicles.length > 0;
   const context = state.vehicleContext;
   const availableTransferVehicles = getSelectableVehiclesForTransfer().length;
 
-  currentVehicleStatus.classList.toggle("hidden", !isEmployee);
-  changeVehicleButton.classList.toggle("hidden", !isEmployee);
+  currentVehicleStatus.classList.toggle("hidden", !isPunchClock);
+  changeVehicleButton.classList.toggle("hidden", !isPunchClock);
 
-  if (!isEmployee) {
+  if (!isPunchClock) {
     return;
   }
 
@@ -1106,8 +1131,7 @@ function syncTransferVehicleKms() {
 }
 
 function getSelectableVehiclesForPoint() {
-  const isEmployee = state.user?.role === "employee";
-  if (!isEmployee) {
+  if (!isPunchClockRole()) {
     return state.vehicles;
   }
 
@@ -1120,8 +1144,7 @@ function getSelectableVehiclesForPoint() {
 }
 
 function getSelectableVehiclesForTransfer() {
-  const isEmployee = state.user?.role === "employee";
-  if (!isEmployee) {
+  if (!isPunchClockRole()) {
     return state.vehicles;
   }
 
@@ -1192,13 +1215,24 @@ function renderEmployeeEditor() {
   manageEmployeeIdInput.value = employee.id;
   editEmployeeNameInput.value = employee.name;
   editEmployeeIdInput.value = employee.employeeId;
+
+  // Permissoes de um gestor so podem ser vistas/editadas pelo admin real,
+  // mesmo que um outro gestor com acesso a Cadastros tenha aberto esse editor
+  // pra um funcionario comum (que nunca tem role "manager" aqui).
+  const canEditPermissions = state.user?.role === "admin" && employee.role === "manager";
+  editPermissionsGroup?.classList.toggle("hidden", !canEditPermissions);
+  if (canEditPermissions) {
+    document.querySelectorAll(".edit-permission").forEach((input) => {
+      input.checked = (employee.permissions || []).includes(input.value);
+    });
+  }
   employeePasswordForm.reset();
 }
 
 function renderManagedEmployees() {
-  const isAdmin = state.user?.role === "admin";
+  const canManage = hasSectionAccess("cadastros");
 
-  if (!isAdmin) {
+  if (!canManage) {
     state.employees = [];
     state.managedEmployeeId = "";
     state.employeeManageSearch = "";
@@ -1251,6 +1285,12 @@ function renderManagedEmployees() {
 
     const nameCell = document.createElement("td");
     nameCell.textContent = employee.name;
+    if (employee.role === "manager") {
+      const badge = document.createElement("span");
+      badge.className = "manager-badge";
+      badge.textContent = "Gestor";
+      nameCell.appendChild(badge);
+    }
 
     const employeeIdCell = document.createElement("td");
     employeeIdCell.textContent = employee.employeeId;
@@ -1312,7 +1352,7 @@ function renderVehicles() {
     return;
   }
 
-  if (state.user?.role !== "admin") {
+  if (!hasSectionAccess("cadastros")) {
     vehicleAdminBody.innerHTML = "";
     state.showVehicleRegisterForm = false;
     state.vehicleManageSearch = "";
@@ -1376,9 +1416,7 @@ function updateExportLinks() {
 }
 
 function renderRegisterForm() {
-  const isAdmin = state.user?.role === "admin";
-
-  if (!isAdmin) {
+  if (!hasSectionAccess("cadastros")) {
     state.showRegisterForm = false;
     registerForm.classList.add("hidden");
     return;
@@ -1386,6 +1424,16 @@ function renderRegisterForm() {
 
   registerForm.classList.toggle("hidden", !state.showRegisterForm);
   toggleRegisterButton.textContent = state.showRegisterForm ? "Ocultar cadastro" : "Novo cadastro";
+
+  // So o admin real cria login de gestor (e define as permissoes dele). Um
+  // gestor com acesso a Cadastros so cria funcionario comum, entao nem ve
+  // essa opcao.
+  const canCreateManager = state.user?.role === "admin";
+  registerRoleBlock?.classList.toggle("hidden", !canCreateManager);
+  if (!canCreateManager && registerRole) {
+    registerRole.value = "employee";
+  }
+  handleRegisterRoleChange();
 }
 
 function renderSummary() {
@@ -1541,7 +1589,7 @@ function renderAlerts() {
 }
 
 function handleToggleAlerts() {
-  if (state.user?.role !== "admin") {
+  if (!hasSectionAccess("overview")) {
     return;
   }
 
@@ -1550,7 +1598,7 @@ function handleToggleAlerts() {
 }
 
 async function loadAlerts() {
-  if (state.user?.role !== "admin") {
+  if (!hasSectionAccess("overview")) {
     state.alerts = [];
     state.alertCounts = null;
     renderAlerts();
@@ -1560,8 +1608,12 @@ async function loadAlerts() {
   // As pendencias so respeitam o filtro de matricula: periodo e veiculo cortariam
   // batidas do meio da jornada e criariam alerta falso.
   const data = await api(`/api/admin/alerts${buildQueryString({ employeeId: state.adminFilters.employeeId })}`);
-  state.alerts = data.alerts || [];
-  state.alertCounts = data.counts || null;
+  // O painel so deve mostrar o que realmente falta finalizar (jornada ou almoco
+  // em aberto). Alertas de conferencia (jornada longa, sem intervalo, etc.) e de
+  // baixa prioridade ficam de fora daqui.
+  const alerts = (data.alerts || []).filter((alert) => alert.severity === "alta");
+  state.alerts = alerts;
+  state.alertCounts = { total: alerts.length, alta: alerts.length, media: 0, baixa: 0 };
   renderAlerts();
 }
 
@@ -1630,7 +1682,7 @@ function renderSummaryAggregates() {
 }
 
 function handleToggleAggregates() {
-  if (state.user?.role !== "admin") {
+  if (!hasSectionAccess("overview")) {
     return;
   }
 
@@ -1638,24 +1690,100 @@ function handleToggleAggregates() {
   renderSummaryAggregates();
 }
 
+// So aparece pro gestor (admin nunca bate ponto por esse login, funcionario
+// comum nunca tem painel admin, entao nenhum dos dois precisa alternar).
+function renderManagerViewSwitch() {
+  if (!managerViewSwitch) {
+    return;
+  }
+
+  const isManager = state.user?.role === "manager";
+  managerViewSwitch.classList.toggle("hidden", !isManager);
+  if (!isManager) {
+    return;
+  }
+
+  managerViewPunchButton?.classList.toggle("active", state.managerView === "punch");
+  managerViewAdminButton?.classList.toggle("active", state.managerView === "admin");
+}
+
+function handleManagerViewSwitchClick(event) {
+  const button = event.target.closest("[data-manager-view]");
+  if (!button) {
+    return;
+  }
+
+  state.managerView = button.dataset.managerView;
+  renderSession();
+}
+
+// Admin tem acesso total a qualquer area. Gestor so tem a area especifica se
+// ela estiver em state.user.permissions (definidas pelo admin no cadastro).
+function hasSectionAccess(section) {
+  if (state.user?.role === "admin") {
+    return true;
+  }
+
+  return state.user?.role === "manager" && Boolean(state.user.permissions?.includes(section));
+}
+
+// Gestor bate ponto igual funcionario comum, alem de acessar as areas do
+// painel liberadas pra ele. So o admin real nao tem tela de ponto.
+function isPunchClockRole() {
+  return state.user?.role === "employee" || state.user?.role === "manager";
+}
+
+function getAllowedAdminTabKeys() {
+  return ADMIN_SECTIONS.map((section) => section.key).filter((key) => hasSectionAccess(key));
+}
+
+// Usada pra decidir se a lista de Registros mostra so os proprios (igual
+// funcionario) ou a empresa toda com filtros (igual admin).
+function canSeeAllRecords() {
+  return hasSectionAccess("registros");
+}
+
+// Diferente de canSeeAllRecords: um gestor com permissao de registros so ve
+// a empresa toda quando ESTA na aba Registros do painel administrativo. Na
+// tela de "Meu ponto" ele sempre ve a propria jornada, senao o cartao de
+// ponto pessoal dele misturaria registros de todo mundo.
+function isShowingAllRecordsView() {
+  return state.user?.role === "admin" || (state.user?.role === "manager" && state.managerView === "admin" && hasSectionAccess("registros"));
+}
+
 // O painel do admin virou 4 abas (Visao geral / Registros / Cadastros / Rotas)
 // para nao obrigar rolagem longa toda vez que o admin so quer ver pendencias.
 // A secao de Registros e compartilhada com a tela do funcionario, entao ela
 // fica fora do #adminPanel no DOM e e apenas escondida/mostrada aqui conforme
 // a aba ativa.
+//
+// Gestor bate ponto igual funcionario, entao ele alterna entre a tela de
+// ponto (state.managerView === "punch") e o painel administrativo restrito
+// as areas liberadas (state.managerView === "admin"). Sem nenhuma area
+// liberada, o painel admin nao tem o que mostrar e a tela de ponto prevalece.
 function renderAdminTabs() {
-  const isAdmin = state.user?.role === "admin";
+  const role = state.user?.role;
+  const isManager = role === "manager";
+  const allowedTabs = getAllowedAdminTabKeys();
+  const showingAdminPanel = role === "admin" || (isManager && state.managerView === "admin" && allowedTabs.length > 0);
+
   if (adminTabs) {
-    adminTabs.classList.toggle("hidden", !isAdmin);
+    adminTabs.classList.toggle("hidden", !showingAdminPanel);
   }
 
-  if (!isAdmin) {
+  if (!showingAdminPanel) {
     recordsSection?.classList.remove("hidden");
     return;
   }
 
+  if (!allowedTabs.includes(state.adminTab)) {
+    state.adminTab = allowedTabs[0];
+  }
+
   for (const button of adminTabButtons) {
-    button.classList.toggle("active", button.dataset.adminTab === state.adminTab);
+    const key = button.dataset.adminTab;
+    button.classList.toggle("hidden", !allowedTabs.includes(key));
+    button.classList.toggle("active", key === state.adminTab);
   }
 
   adminTabOverview?.classList.toggle("hidden", state.adminTab !== "overview");
@@ -1697,7 +1825,7 @@ function renderRouteRegisterForm() {
 }
 
 function handleToggleRouteRegisterForm() {
-  if (state.user?.role !== "admin") {
+  if (!hasSectionAccess("rotas")) {
     return;
   }
 
@@ -1705,6 +1833,9 @@ function handleToggleRouteRegisterForm() {
   state.showRouteRegisterForm = !wasOpen;
   if (wasOpen) {
     routeRegisterForm?.reset();
+    resetRouteStopsFields();
+  } else if (!routeStopsFieldList?.children.length) {
+    resetRouteStopsFields();
   }
   renderRouteRegisterForm();
 }
@@ -1724,7 +1855,7 @@ function renderRouteCitySuggestions() {
 }
 
 async function loadRouteCities() {
-  if (state.user?.role !== "admin") {
+  if (!hasSectionAccess("rotas")) {
     state.routeCities = [];
     renderRouteCitySuggestions();
     return;
@@ -1750,7 +1881,7 @@ function renderRouteDriverSuggestions() {
 }
 
 async function loadRouteDrivers() {
-  if (state.user?.role !== "admin") {
+  if (!hasSectionAccess("rotas")) {
     state.routeDrivers = [];
     renderRouteDriverSuggestions();
     return;
@@ -1761,31 +1892,188 @@ async function loadRouteDrivers() {
   renderRouteDriverSuggestions();
 }
 
-// Cada linha colada vira uma parada: Operacao, Cidade, Cliente, Endereco,
-// Contato, nessa ordem. Aceita Tab (o que sai ao colar do Excel/Sheets) ou "|"
-// (para quem preferir digitar a mao). Linhas sem cidade ou sem endereco sao
-// descartadas, ja que o backend tambem exige os dois.
-function parseRouteStopsInput(rawText) {
-  return rawText
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const delimiter = line.includes("\t") ? "\t" : "|";
-      const [operation = "", city = "", client = "", address = "", contact = ""] = line
-        .split(delimiter)
-        .map((field) => field.trim());
-      return { operation, city, client, address, contact };
-    })
+const ROUTE_STOP_FIELD_NAMES = ["operation", "city", "client", "address", "contact"];
+
+function fillRouteStopFieldCard(card, stop) {
+  if (!stop) {
+    return;
+  }
+
+  for (const field of ROUTE_STOP_FIELD_NAMES) {
+    card.querySelector(`.route-stop-${field}`).value = stop[field] || "";
+  }
+}
+
+function isRouteStopFieldCardEmpty(card) {
+  return ROUTE_STOP_FIELD_NAMES.every((field) => !card.querySelector(`.route-stop-${field}`).value.trim());
+}
+
+// Cada parada vira um card com campos proprios (Operacao, Cidade, Cliente,
+// Endereco, Contato). Cards sem cidade ou sem endereco sao descartados, ja
+// que o backend tambem exige os dois. Passar um "stop" ja preenche o card
+// (usado ao reaproveitar um endereco ja salvo em outra rota).
+function addRouteStopField(stop = null) {
+  if (!routeStopsFieldList || !routeStopFieldTemplate) {
+    return;
+  }
+
+  const fragment = routeStopFieldTemplate.content.cloneNode(true);
+  const card = fragment.querySelector(".route-stop-field-card");
+  fillRouteStopFieldCard(card, stop);
+  bindEvent(card.querySelector(".route-stop-field-remove"), "click", () => {
+    card.remove();
+    if (!routeStopsFieldList.children.length) {
+      addRouteStopField();
+    }
+    renumberRouteStopFields();
+  });
+  routeStopsFieldList.appendChild(fragment);
+  renumberRouteStopFields();
+}
+
+// Reaproveita um endereco ja salvo (achado numa busca por cidade ou por
+// motorista) como parada de uma rota nova, sem precisar digitar tudo de novo.
+function handleAddRouteStopFromResult(stopId) {
+  const stop = findStopInResults(stopId);
+  if (!stop || !routeStopsFieldList) {
+    return;
+  }
+
+  if (!state.showRouteRegisterForm) {
+    state.showRouteRegisterForm = true;
+    renderRouteRegisterForm();
+  }
+
+  if (!routeStopsFieldList.children.length) {
+    resetRouteStopsFields();
+  }
+
+  const emptyCard = [...routeStopsFieldList.querySelectorAll(".route-stop-field-card")].find(
+    (card) => isRouteStopFieldCardEmpty(card)
+  );
+
+  if (emptyCard) {
+    fillRouteStopFieldCard(emptyCard, stop);
+  } else {
+    addRouteStopField(stop);
+  }
+
+  setRouteManagerMessage(`Endereco de ${stop.city} adicionado a nova rota.`);
+  routeRegisterForm?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function setNewAddressMessage(message, isError = false) {
+  if (!newAddressMessage) {
+    return;
+  }
+
+  newAddressMessage.textContent = message;
+  newAddressMessage.style.color = isError ? "#a33f33" : "";
+}
+
+// Atalho pra cadastrar so um endereco (ou uma cidade nova, que e so texto
+// livre no campo Cidade) direto a partir da busca, sem passar pelo formulario
+// de "Cadastrar rota" (que pede nome de rota e motorista e nao faz sentido
+// pra um endereco avulso).
+function handleAddNewAddress() {
+  if (!newAddressDialog || !newAddressForm) {
+    return;
+  }
+
+  newAddressForm.reset();
+  setNewAddressMessage("");
+  newAddressCity.value = routeCitySearchInput?.value.trim() || "";
+  newAddressDialog.showModal();
+  (newAddressCity.value ? newAddressAddress : newAddressCity).focus();
+}
+
+function handleNewAddressCancel() {
+  newAddressDialog?.close();
+}
+
+async function handleNewAddressSubmit(event) {
+  event.preventDefault();
+
+  const stop = {
+    operation: newAddressOperation.value.trim(),
+    city: newAddressCity.value.trim(),
+    client: newAddressClient.value.trim(),
+    address: newAddressAddress.value.trim(),
+    contact: newAddressContact.value.trim(),
+  };
+
+  if (!stop.city || !stop.address) {
+    setNewAddressMessage("Informe cidade e endereco.", true);
+    return;
+  }
+
+  const payload = {
+    name: stop.client || `Endereco avulso - ${stop.city}`,
+    driver: "",
+    stops: [stop],
+  };
+
+  try {
+    await api("/api/admin/routes", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+
+    newAddressDialog.close();
+    await loadRouteCities();
+    if (state.routeSearchCity) {
+      await handleSearchRoutes();
+    }
+    setRouteManagerMessage(`Endereco de ${stop.city} cadastrado com sucesso.`);
+  } catch (error) {
+    setNewAddressMessage(error.message, true);
+  }
+}
+
+function renumberRouteStopFields() {
+  if (!routeStopsFieldList) {
+    return;
+  }
+
+  routeStopsFieldList.querySelectorAll(".route-stop-field-card").forEach((card, index) => {
+    const title = card.querySelector(".route-stop-field-title");
+    if (title) {
+      title.textContent = `Parada ${index + 1}`;
+    }
+  });
+}
+
+function resetRouteStopsFields() {
+  if (!routeStopsFieldList) {
+    return;
+  }
+
+  routeStopsFieldList.innerHTML = "";
+  addRouteStopField();
+}
+
+function collectRouteStopsFromFields() {
+  if (!routeStopsFieldList) {
+    return [];
+  }
+
+  return [...routeStopsFieldList.querySelectorAll(".route-stop-field-card")]
+    .map((card) => ({
+      operation: card.querySelector(".route-stop-operation").value.trim(),
+      city: card.querySelector(".route-stop-city").value.trim(),
+      client: card.querySelector(".route-stop-client").value.trim(),
+      address: card.querySelector(".route-stop-address").value.trim(),
+      contact: card.querySelector(".route-stop-contact").value.trim(),
+    }))
     .filter((stop) => stop.city && stop.address);
 }
 
 async function handleRouteRegister(event) {
   event.preventDefault();
 
-  const stops = parseRouteStopsInput(registerRouteStops.value);
+  const stops = collectRouteStopsFromFields();
   if (!stops.length) {
-    setRouteManagerMessage("Nenhuma parada valida encontrada. Cada linha precisa de cidade e endereco.", true);
+    setRouteManagerMessage("Nenhuma parada valida encontrada. Cada parada precisa de cidade e endereco.", true);
     return;
   }
 
@@ -1802,6 +2090,7 @@ async function handleRouteRegister(event) {
     });
 
     routeRegisterForm.reset();
+    resetRouteStopsFields();
     state.showRouteRegisterForm = false;
     renderRouteRegisterForm();
     await loadRouteCities();
@@ -1883,7 +2172,18 @@ function openRouteStopEditDialog(routeId, stopId) {
   routeStopEditDialog.showModal();
 }
 
-function handleRouteResultsEditClick(event) {
+function handleRouteResultsClick(event) {
+  const addButton = event.target.closest("[data-add-route-stop]");
+  if (addButton) {
+    handleAddRouteStopFromResult(addButton.dataset.addRouteStop);
+    return;
+  }
+
+  if (event.target.closest("[data-add-new-address]")) {
+    handleAddNewAddress();
+    return;
+  }
+
   const editButton = event.target.closest("[data-edit-stop]");
   if (!editButton) {
     return;
@@ -1961,7 +2261,10 @@ function renderRoutesResults() {
   }
 
   if (!state.routeStopResults.length) {
-    routesResults.innerHTML = `<p class="muted">Nenhum endereco cadastrado para ${escapeHtml(state.routeSearchCity)}.</p>`;
+    routesResults.innerHTML = `
+      <p class="muted">Nenhum endereco cadastrado para ${escapeHtml(state.routeSearchCity)}.</p>
+      <button type="button" class="ghost table-action" data-add-new-address>+ Cadastrar endereco em ${escapeHtml(state.routeSearchCity)}</button>
+    `;
     return;
   }
 
@@ -1987,7 +2290,10 @@ function renderRoutesResults() {
           </div>
           <div class="route-source-row">
             <p class="route-source">Rota: ${escapeHtml(stop.routeName || "-")}</p>
-            <button type="button" class="ghost table-action" data-edit-route="${stop.routeId}" data-edit-stop="${stop.id}">Editar</button>
+            <div class="route-card-actions">
+              <button type="button" class="secondary table-action" data-add-route-stop="${stop.id}">Adicionar a rota</button>
+              <button type="button" class="ghost table-action" data-edit-route="${stop.routeId}" data-edit-stop="${stop.id}">Editar</button>
+            </div>
           </div>
         </article>
       `;
@@ -2046,7 +2352,10 @@ function renderRouteDriverResults() {
           return `
             <li class="route-stops-item">
               <span class="route-stops-item-text">${opBadge}${clientPart}${escapeHtml(stop.city)}, ${escapeHtml(stop.address)}${contactPart}</span>
-              <button type="button" class="ghost table-action" data-edit-route="${route.id}" data-edit-stop="${stop.id}">Editar</button>
+              <div class="route-card-actions">
+                <button type="button" class="secondary table-action" data-add-route-stop="${stop.id}">Adicionar a rota</button>
+                <button type="button" class="ghost table-action" data-edit-route="${route.id}" data-edit-stop="${stop.id}">Editar</button>
+              </div>
             </li>
           `;
         })
@@ -2112,9 +2421,12 @@ function renderSession() {
       : "";
 
   const isAdmin = user.role === "admin";
-  employeePanel.classList.toggle("hidden", isAdmin);
-  adminPanel.classList.toggle("hidden", !isAdmin);
-  recordsTitle.textContent = isAdmin ? "Todos os registros" : "Meus registros";
+  const isManager = user.role === "manager";
+  const showingAdminPanel = isAdmin || (isManager && state.managerView === "admin");
+  employeePanel.classList.toggle("hidden", showingAdminPanel);
+  adminPanel.classList.toggle("hidden", !showingAdminPanel);
+  renderManagerViewSwitch();
+  recordsTitle.textContent = canSeeAllRecords() ? "Todos os registros" : "Meus registros";
   recordsSubtitle.textContent = isAdmin
     ? ""
     : "";
@@ -2170,12 +2482,17 @@ async function loadSession() {
   if (state.user) {
     await loadVehicles();
     await loadRecords();
-    if (state.user.role === "admin") {
+    // Cada load* abaixo se auto-limita pela permissao da area (hasSectionAccess),
+    // entao chamar todos pro admin ou pro gestor e seguro: quem nao tem a area
+    // liberada so recebe estado vazio de volta.
+    if (state.user.role === "admin" || state.user.role === "manager") {
       await loadEmployees();
       await loadAdminInsights();
       await loadRouteCities();
       await loadRouteDrivers();
-    } else {
+    }
+
+    if (isPunchClockRole()) {
       await loadVehicleContext();
       await loadWeekSummary();
     }
@@ -2191,17 +2508,18 @@ async function refreshSessionIfOffline() {
 }
 
 async function loadRecords() {
-  if (state.user?.role === "admin" && !hasActiveAdminFilters()) {
+  const showAllView = isShowingAllRecordsView();
+
+  if (showAllView && !hasActiveAdminFilters()) {
     state.records = [];
     renderEmployeeFilter();
     renderRecords();
     return;
   }
 
-  const path =
-    state.user?.role === "admin"
-      ? `/api/me/records${buildQueryString(state.adminFilters)}`
-      : "/api/me/records";
+  const path = showAllView
+    ? `/api/me/records${buildQueryString({ ...state.adminFilters, scope: "all" })}`
+    : "/api/me/records";
   const data = await api(path);
   state.records = data.records;
   renderEmployeeFilter();
@@ -2210,7 +2528,7 @@ async function loadRecords() {
 }
 
 async function loadSummary() {
-  if (state.user?.role !== "admin") {
+  if (!hasSectionAccess("overview")) {
     state.summary = [];
     state.summaryAggregates = [];
     state.summaryCompanyTotals = null;
@@ -2235,7 +2553,7 @@ async function loadAdminInsights() {
 }
 
 function handleToggleSummary() {
-  if (state.user?.role !== "admin") {
+  if (!hasSectionAccess("overview")) {
     return;
   }
 
@@ -2244,7 +2562,7 @@ function handleToggleSummary() {
 }
 
 async function loadEmployees() {
-  if (state.user?.role !== "admin") {
+  if (!hasSectionAccess("cadastros")) {
     state.employees = [];
     state.managedEmployeeId = "";
     renderManagedEmployees();
@@ -2258,7 +2576,7 @@ async function loadEmployees() {
 }
 
 async function loadVehicleContext() {
-  if (state.user?.role !== "employee") {
+  if (!isPunchClockRole()) {
     state.vehicleContext = null;
     renderEmployeeVehicleContext();
     return;
@@ -2275,9 +2593,9 @@ function renderWeekSummary() {
     return;
   }
 
-  const isEmployee = state.user?.role === "employee";
-  weekSummaryCard.classList.toggle("hidden", !isEmployee);
-  if (!isEmployee || !state.weekSummary) {
+  const isPunchClock = isPunchClockRole();
+  weekSummaryCard.classList.toggle("hidden", !isPunchClock);
+  if (!isPunchClock || !state.weekSummary) {
     return;
   }
 
@@ -2290,7 +2608,7 @@ function renderWeekSummary() {
 }
 
 async function loadWeekSummary() {
-  if (state.user?.role !== "employee") {
+  if (!isPunchClockRole()) {
     state.weekSummary = null;
     renderWeekSummary();
     return;
@@ -2431,6 +2749,11 @@ function collectVehicleTransferInfo() {
   });
 }
 
+function handleRegisterRoleChange() {
+  const isManager = registerRole?.value === "manager";
+  registerPermissionsGroup?.classList.toggle("hidden", !isManager);
+}
+
 async function handleRegister(event) {
   event.preventDefault();
   const payload = {
@@ -2438,6 +2761,11 @@ async function handleRegister(event) {
     employeeId: document.querySelector("#registerEmployeeId").value.trim(),
     password: document.querySelector("#registerPassword").value.trim(),
   };
+
+  if (state.user?.role === "admin" && registerRole?.value === "manager") {
+    payload.role = "manager";
+    payload.permissions = [...document.querySelectorAll(".register-permission:checked")].map((input) => input.value);
+  }
 
   try {
     const data = await api("/api/admin/employees", {
@@ -2491,7 +2819,8 @@ async function handleLogout() {
   state.offlineSnapshotCachedAt = "";
   clearOfflineSnapshot();
   renderOfflineBanner();
-  state.summaryCollapsed = false;
+  state.summaryCollapsed = true;
+  state.aggregatesCollapsed = true;
   state.managedEmployeeId = "";
   state.showRegisterForm = false;
   state.showVehicleRegisterForm = false;
@@ -2632,7 +2961,7 @@ function handleAppVisible() {
 
 // Atualizacao automatica das pendencias enquanto o admin esta com o painel aberto.
 function refreshAlertsInBackground() {
-  if (state.user?.role !== "admin" || state.offlineSnapshotActive || document.visibilityState !== "visible") {
+  if (!hasSectionAccess("overview") || state.offlineSnapshotActive || document.visibilityState !== "visible") {
     return;
   }
 
@@ -2642,7 +2971,7 @@ function refreshAlertsInBackground() {
 async function handleExportXlsx(event) {
   event.preventDefault();
 
-  if (state.user?.role !== "admin") {
+  if (!hasSectionAccess("registros")) {
     return;
   }
 
@@ -2707,7 +3036,7 @@ async function handleExportXlsx(event) {
 }
 
 function handleToggleRegisterForm() {
-  if (state.user?.role !== "admin") {
+  if (!hasSectionAccess("cadastros")) {
     return;
   }
 
@@ -2803,7 +3132,7 @@ async function handleVehicleAdminClick(event) {
 }
 
 function handleToggleVehicleRegisterForm() {
-  if (state.user?.role !== "admin") {
+  if (!hasSectionAccess("cadastros")) {
     return;
   }
 
@@ -2840,6 +3169,10 @@ async function handleEmployeeEditSubmit(event) {
     name: editEmployeeNameInput.value.trim(),
     employeeId: editEmployeeIdInput.value.trim(),
   };
+
+  if (editPermissionsGroup && !editPermissionsGroup.classList.contains("hidden")) {
+    payload.permissions = [...document.querySelectorAll(".edit-permission:checked")].map((input) => input.value);
+  }
 
   try {
     const data = await api(`/api/admin/employees/${employeeId}`, {
@@ -2939,7 +3272,7 @@ function closeRecordEditDialog() {
 
 function handleRecordsClick(event) {
   const editButton = event.target.closest("[data-edit-record]");
-  if (!editButton || state.user?.role !== "admin") {
+  if (!editButton || !hasSectionAccess("registros")) {
     return;
   }
 
@@ -3004,7 +3337,7 @@ function handleRecordEditCancel() {
 }
 
 async function handleRecordDelete() {
-  if (state.user?.role !== "admin") {
+  if (!hasSectionAccess("registros")) {
     return;
   }
 
@@ -3236,7 +3569,7 @@ function handleVehicleTransferDialogClose() {
 }
 
 function persistOfflineSnapshot() {
-  if (state.user?.role !== "employee") {
+  if (!isPunchClockRole()) {
     return;
   }
 
@@ -3334,7 +3667,7 @@ function discardPendingPunch(clientRequestId) {
 }
 
 async function trySyncQueue() {
-  if (pendingPunchSyncInFlight || !state.user || state.user.role !== "employee") {
+  if (pendingPunchSyncInFlight || !isPunchClockRole()) {
     return;
   }
 
@@ -3528,6 +3861,7 @@ async function registerPoint(action) {
 
 bindEvent(loginForm, "submit", handleLogin);
 bindEvent(registerForm, "submit", handleRegister);
+bindEvent(registerRole, "change", handleRegisterRoleChange);
 bindEvent(logoutButton, "click", handleLogout);
 bindEvent(toggleRegisterButton, "click", handleToggleRegisterForm);
 bindEvent(toggleVehicleRegisterButton, "click", handleToggleVehicleRegisterForm);
@@ -3542,6 +3876,7 @@ bindEvent(toggleSummaryButton, "click", handleToggleSummary);
 bindEvent(toggleAggregatesButton, "click", handleToggleAggregates);
 bindEvent(toggleAlertsButton, "click", handleToggleAlerts);
 bindEvent(adminTabs, "click", handleAdminTabClick);
+bindEvent(managerViewSwitch, "click", handleManagerViewSwitchClick);
 bindEvent(employeeAdminBody, "click", handleEmployeeAdminClick);
 bindEvent(employeeEditForm, "submit", handleEmployeeEditSubmit);
 bindEvent(cancelEmployeeEditButton, "click", handleCancelEmployeeEdit);
@@ -3559,13 +3894,15 @@ bindEvent(vehicleForm, "submit", handleVehicleSubmit);
 bindEvent(vehicleSelectInput, "change", syncSelectedVehicleKm);
 bindEvent(vehicleCancelButton, "click", handleVehicleCancel);
 bindEvent(toggleRouteRegisterButton, "click", handleToggleRouteRegisterForm);
+bindEvent(addRouteStopButton, "click", addRouteStopField);
 bindEvent(routeRegisterForm, "submit", handleRouteRegister);
 bindEvent(searchRoutesButton, "click", handleSearchRoutes);
 bindEvent(clearRouteSearchButton, "click", handleClearRouteSearch);
-bindEvent(routesResults, "click", handleRouteResultsEditClick);
+bindEvent(addNewAddressButton, "click", handleAddNewAddress);
+bindEvent(routesResults, "click", handleRouteResultsClick);
 bindEvent(searchRouteDriverButton, "click", handleSearchRouteDrivers);
 bindEvent(clearRouteDriverSearchButton, "click", handleClearRouteDriverSearch);
-bindEvent(routeDriverResults, "click", handleRouteResultsEditClick);
+bindEvent(routeDriverResults, "click", handleRouteResultsClick);
 bindEvent(vehicleDialog, "cancel", handleVehicleCancel);
 bindEvent(vehicleDialog, "close", handleVehicleDialogClose);
 bindEvent(vehicleTransferForm, "submit", handleVehicleTransferSubmit);
@@ -3580,6 +3917,8 @@ bindEvent(recordEditDialog, "cancel", handleRecordEditCancel);
 bindEvent(routeStopEditForm, "submit", handleRouteStopEditSubmit);
 bindEvent(routeStopEditDeleteButton, "click", handleRouteStopEditDelete);
 bindEvent(routeStopEditCancelButton, "click", handleRouteStopEditCancel);
+bindEvent(newAddressForm, "submit", handleNewAddressSubmit);
+bindEvent(newAddressCancelButton, "click", handleNewAddressCancel);
 bindEvent(routeStopEditDialog, "cancel", handleRouteStopEditCancel);
 bindEvent(routeStopEditAddress, "input", updateRouteStopEditMapsLink);
 bindEvent(employeeManageSearchInput, "keydown", (event) => {

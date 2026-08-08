@@ -1014,7 +1014,7 @@ test("funcionario comum nao pode corrigir horario de registro pelo endpoint admi
     localTime: "09:00:00",
   });
   assert.equal(deniedResponse.status, 403);
-  assert.match(deniedResponse.body.error, /administrador/i);
+  assert.match(deniedResponse.body.error, /permissao/i);
 });
 
 test("admin consegue redefinir a senha do funcionario", async () => {

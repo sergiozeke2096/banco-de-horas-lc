@@ -16,6 +16,7 @@ const AUTH_DURATION_MS = 1000 * 60 * 60 * 12;
 const SIGNED_EXPORT_DURATION_MS = 1000 * 60 * 5;
 const SUPABASE_PAGE_SIZE = 1000;
 const TIME_RECORD_ACTIONS = ["Entrada", "Saida para almoco", "Retorno do almoco", "Saida"];
+const ADMIN_SECTIONS = ["overview", "registros", "cadastros", "rotas"];
 const APP_TIME_ZONE = "America/Sao_Paulo";
 const localDateFormatter = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeZone: APP_TIME_ZONE });
 const localTimeFormatter = new Intl.DateTimeFormat("pt-BR", { timeStyle: "medium", timeZone: APP_TIME_ZONE });
@@ -59,6 +60,7 @@ function serializeUser(user) {
     name: user.name,
     employeeId: user.employee_id,
     role: user.role,
+    permissions: user.permissions || [],
   };
 }
 
@@ -68,6 +70,7 @@ function serializeManagedEmployee(user) {
     name: user.name,
     employeeId: user.employee_id,
     role: user.role,
+    permissions: user.permissions || [],
     createdAt: user.created_at,
   };
 }
@@ -199,7 +202,7 @@ async function validateSupabaseSchema() {
       table: "users",
       query: supabase
         .from("users")
-        .select("id, name, employee_id, password_hash, role", { head: true, count: "exact" })
+        .select("id, name, employee_id, password_hash, role, permissions", { head: true, count: "exact" })
         .limit(1),
     },
     {
@@ -279,11 +282,58 @@ function ensureRuntimeConfig() {
   }
 }
 
+// Gestor bate ponto igual funcionario comum, alem de acessar as areas do
+// painel liberadas pra ele. So o admin real nao tem tela de ponto.
+function isPunchClockUser(user) {
+  return user?.role === "employee" || user?.role === "manager";
+}
+
+// Admin real sempre ve todos os registros. Gestor so ve todos quando tem a
+// permissao "registros" liberada; sem ela, cai no mesmo caso do funcionario
+// (so os proprios registros).
+function canManageAllRecords(user) {
+  if (user?.role === "admin") {
+    return true;
+  }
+
+  return user?.role === "manager" && Array.isArray(user.permissions) && user.permissions.includes("registros");
+}
+
+function normalizePermissionsList(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return [...new Set(value.map((item) => String(item || "").trim()).filter((item) => ADMIN_SECTIONS.includes(item)))];
+}
+
 function requireAdmin(req, res, next) {
   if (!req.authUser || req.authUser.role !== "admin") {
     return res.status(403).json({ error: "Acesso restrito ao administrador." });
   }
   return next();
+}
+
+// Libera pro admin (sempre) ou pra um gestor com a area especifica liberada
+// em `permissions`. Usada nas rotas administrativas que um gestor pode
+// acessar de forma parcial, ao contrario de requireAdmin (tudo ou nada).
+function requireAdminSection(section) {
+  return (req, res, next) => {
+    const user = req.authUser;
+    if (!user) {
+      return res.status(403).json({ error: "Acesso restrito ao administrador." });
+    }
+
+    if (user.role === "admin") {
+      return next();
+    }
+
+    if (user.role === "manager" && Array.isArray(user.permissions) && user.permissions.includes(section)) {
+      return next();
+    }
+
+    return res.status(403).json({ error: "Voce nao tem permissao para acessar esta area." });
+  };
 }
 
 async function runQuery(query) {
@@ -896,7 +946,7 @@ async function getUserById(userId) {
   return localUsers.find((user) => isSameEntityId(user.id, userId)) || null;
 }
 
-async function insertEmployeeUser(name, employeeId, passwordHash) {
+async function insertEmployeeUser(name, employeeId, passwordHash, role = "employee", permissions = []) {
   if (storageMode === "supabase") {
     return runQuery(
       supabase
@@ -905,7 +955,8 @@ async function insertEmployeeUser(name, employeeId, passwordHash) {
           name: String(name).trim(),
           employee_id: String(employeeId).trim(),
           password_hash: passwordHash,
-          role: "employee",
+          role,
+          permissions,
         })
         .select("*")
         .single()
@@ -917,26 +968,32 @@ async function insertEmployeeUser(name, employeeId, passwordHash) {
     name: String(name).trim(),
     employee_id: String(employeeId).trim(),
     password_hash: passwordHash,
-    role: "employee",
+    role,
+    permissions,
     created_at: new Date().toISOString(),
   };
   localUsers.push(user);
   return user;
 }
 
-async function listEmployees() {
+// Sem includeManagers, so traz motoristas/funcionarios (uso normal da tela de
+// Cadastros por um gestor). Com includeManagers, o admin real tambem ve os
+// logins de gestor (pra poder editar permissao ou excluir).
+async function listEmployees(includeManagers = false) {
+  const roles = includeManagers ? ["employee", "manager"] : ["employee"];
+
   if (storageMode === "supabase") {
     return runQuery(
       supabase
         .from("users")
         .select("*")
-        .eq("role", "employee")
+        .in("role", roles)
         .order("name", { ascending: true })
     );
   }
 
   return [...localUsers]
-    .filter((user) => user.role === "employee")
+    .filter((user) => roles.includes(user.role))
     .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), "pt-BR"));
 }
 
@@ -1448,20 +1505,23 @@ function getVehicleUsageConflict(usageMap, vehiclePlate, userId) {
   return String(usage.userId) === String(userId) ? null : usage;
 }
 
-async function updateEmployeeUser(userId, updates) {
+// allowedRoles restringe quais contas podem ser atingidas: um gestor com
+// permissao de cadastros so alcanca "employee" (motoristas); o admin real
+// tambem alcanca "manager" (pra editar nome/senha/permissoes de um gestor).
+async function updateEmployeeUser(userId, updates, allowedRoles = ["employee"]) {
   if (storageMode === "supabase") {
     return runQuery(
       supabase
         .from("users")
         .update(updates)
         .eq("id", userId)
-        .eq("role", "employee")
+        .in("role", allowedRoles)
         .select("*")
         .maybeSingle()
     );
   }
 
-  const user = localUsers.find((item) => isSameEntityId(item.id, userId) && item.role === "employee");
+  const user = localUsers.find((item) => isSameEntityId(item.id, userId) && allowedRoles.includes(item.role));
   if (!user) {
     return null;
   }
@@ -1470,8 +1530,8 @@ async function updateEmployeeUser(userId, updates) {
   return user;
 }
 
-async function updateEmployeePassword(userId, passwordHash) {
-  return updateEmployeeUser(userId, { password_hash: passwordHash });
+async function updateEmployeePassword(userId, passwordHash, allowedRoles = ["employee"]) {
+  return updateEmployeeUser(userId, { password_hash: passwordHash }, allowedRoles);
 }
 
 async function countRecordsForUser(userId) {
@@ -1525,9 +1585,9 @@ async function syncRecordSnapshotForUser(userId, userSnapshot) {
   ));
 }
 
-async function deleteEmployeeUser(userId) {
+async function deleteEmployeeUser(userId, allowedRoles = ["employee"]) {
   if (storageMode === "supabase") {
-    const { error } = await supabase.from("users").delete().eq("id", userId).eq("role", "employee");
+    const { error } = await supabase.from("users").delete().eq("id", userId).in("role", allowedRoles);
     if (error) {
       throw error;
     }
@@ -1535,13 +1595,19 @@ async function deleteEmployeeUser(userId) {
   }
 
   const before = localUsers.length;
-  localUsers = localUsers.filter((user) => !(isSameEntityId(user.id, userId) && user.role === "employee"));
+  localUsers = localUsers.filter((user) => !(isSameEntityId(user.id, userId) && allowedRoles.includes(user.role)));
   return localUsers.length !== before;
 }
 
-async function listRecordsForUser(user, filters = null) {
+// showAll por padrao segue a permissao do usuario (admin, ou gestor com
+// "registros"). Um gestor que tem essa permissao mas esta na tela de "Meu
+// ponto" passa showAll=false explicitamente, pra ver so a propria jornada em
+// vez da empresa toda misturada no cartao de ponto pessoal dele.
+async function listRecordsForUser(user, filters = null, showAll = null) {
+  const includeAll = showAll === null ? canManageAllRecords(user) : showAll;
+
   if (storageMode === "supabase") {
-    if (user.role === "admin") {
+    if (includeAll) {
       const rows = await listSupabaseRows(() => (
         supabase.from("time_records").select("*").order("recorded_at", { ascending: false })
       ));
@@ -1553,7 +1619,7 @@ async function listRecordsForUser(user, filters = null) {
     ));
   }
 
-  if (user.role === "admin") {
+  if (includeAll) {
     const rows = [...localRecords].sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at));
     return filters ? applyRecordFilters(rows, filters) : rows;
   }
@@ -1846,14 +1912,26 @@ async function createEmployeeFromRequest(req, res) {
     return res.status(409).json({ error: "Ja existe um usuario com essa matricula." });
   }
 
+  // So o admin real pode criar um login de gestor (com permissoes de
+  // painel). Um gestor com acesso a Cadastros sempre cria um funcionario
+  // comum aqui, mesmo que tente mandar role/permissions no corpo.
+  let role = "employee";
+  let permissions = [];
+  if (req.authUser.role === "admin" && String(req.body.role || "") === "manager") {
+    role = "manager";
+    permissions = normalizePermissionsList(req.body.permissions);
+  }
+
   const passwordHash = bcrypt.hashSync(password, 10);
-  const user = await insertEmployeeUser(name, cleanEmployeeId, passwordHash);
+  const user = await insertEmployeeUser(name, cleanEmployeeId, passwordHash, role, permissions);
   return res.status(201).json({ user: serializeUser(user) });
 }
 
-async function requireManagedEmployee(employeeId) {
+// allowedRoles restringe quem pode ser "alcancado": um gestor so gerencia
+// funcionarios comuns; o admin real tambem gerencia outros gestores.
+async function requireManagedEmployee(employeeId, allowedRoles = ["employee"]) {
   const employee = await getUserById(employeeId);
-  if (!employee || employee.role !== "employee") {
+  if (!employee || !allowedRoles.includes(employee.role)) {
     return null;
   }
 
@@ -1862,11 +1940,11 @@ async function requireManagedEmployee(employeeId) {
 
 app.post("/api/auth/register", requireAdmin, asyncRoute(createEmployeeFromRequest));
 
-app.post("/api/admin/employees", requireAdmin, asyncRoute(createEmployeeFromRequest));
+app.post("/api/admin/employees", requireAdminSection("cadastros"), asyncRoute(createEmployeeFromRequest));
 
 app.get("/api/vehicles", requireAuth, asyncRoute(async (_req, res) => {
   const vehicles = await listVehicles();
-  if (_req.authUser.role !== "employee") {
+  if (!isPunchClockUser(_req.authUser)) {
     return res.json({ vehicles: vehicles.map(serializeVehicle) });
   }
 
@@ -1893,7 +1971,7 @@ app.get("/api/vehicles", requireAuth, asyncRoute(async (_req, res) => {
   return res.json({ vehicles: serializedVehicles });
 }));
 
-app.post("/api/admin/vehicles", requireAdmin, asyncRoute(async (req, res) => {
+app.post("/api/admin/vehicles", requireAdminSection("cadastros"), asyncRoute(async (req, res) => {
   const { plate, description, initialKm } = req.body;
 
   if (!plate) {
@@ -1913,12 +1991,12 @@ app.post("/api/admin/vehicles", requireAdmin, asyncRoute(async (req, res) => {
   return res.status(201).json({ vehicle: serializeVehicle(vehicle) });
 }));
 
-app.get("/api/admin/vehicles", requireAdmin, asyncRoute(async (_req, res) => {
+app.get("/api/admin/vehicles", requireAdminSection("cadastros"), asyncRoute(async (_req, res) => {
   const vehicles = await listVehicles();
   return res.json({ vehicles: vehicles.map(serializeVehicle) });
 }));
 
-app.delete("/api/admin/vehicles/:vehicleId", requireAdmin, asyncRoute(async (req, res) => {
+app.delete("/api/admin/vehicles/:vehicleId", requireAdminSection("cadastros"), asyncRoute(async (req, res) => {
   const vehicle = await getVehicleById(req.params.vehicleId);
   if (!vehicle) {
     return res.status(404).json({ error: "Veiculo nao encontrado." });
@@ -1963,7 +2041,7 @@ function parseAndValidateRouteBody(body) {
   return { name: normalizedName, driver: normalizedDriver, stops: normalizedStops };
 }
 
-app.get("/api/admin/routes/cities", requireAdmin, asyncRoute(async (_req, res) => {
+app.get("/api/admin/routes/cities", requireAdminSection("rotas"), asyncRoute(async (_req, res) => {
   const stops = await listAllRouteStops();
   const countsByCity = new Map();
 
@@ -1986,7 +2064,7 @@ app.get("/api/admin/routes/cities", requireAdmin, asyncRoute(async (_req, res) =
   return res.json({ cities });
 }));
 
-app.get("/api/admin/routes/drivers", requireAdmin, asyncRoute(async (_req, res) => {
+app.get("/api/admin/routes/drivers", requireAdminSection("rotas"), asyncRoute(async (_req, res) => {
   const routes = await listAllRoutes();
   const countsByDriver = new Map();
 
@@ -2013,7 +2091,7 @@ app.get("/api/admin/routes/drivers", requireAdmin, asyncRoute(async (_req, res) 
 // enderecos daquela cidade juntando todas as rotas (um PDF pode misturar
 // cidades). Com ?driver, devolve as rotas inteiras daquele motorista, cada
 // uma com as paradas completas, para editar ou conferir a rota toda.
-app.get("/api/admin/routes", requireAdmin, asyncRoute(async (req, res) => {
+app.get("/api/admin/routes", requireAdminSection("rotas"), asyncRoute(async (req, res) => {
   const city = String(req.query.city || "").trim();
   const driver = String(req.query.driver || "").trim();
 
@@ -2067,7 +2145,7 @@ app.get("/api/admin/routes", requireAdmin, asyncRoute(async (req, res) => {
   return res.json({ routes });
 }));
 
-app.get("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) => {
+app.get("/api/admin/routes/:routeId", requireAdminSection("rotas"), asyncRoute(async (req, res) => {
   const route = await getRouteById(req.params.routeId);
   if (!route) {
     return res.status(404).json({ error: "Rota nao encontrada." });
@@ -2077,7 +2155,7 @@ app.get("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) 
   return res.json({ route: serializeRoute(route, stops) });
 }));
 
-app.post("/api/admin/routes", requireAdmin, asyncRoute(async (req, res) => {
+app.post("/api/admin/routes", requireAdminSection("rotas"), asyncRoute(async (req, res) => {
   const parsed = parseAndValidateRouteBody(req.body);
   if (parsed.error) {
     return res.status(400).json({ error: parsed.error });
@@ -2091,7 +2169,7 @@ app.post("/api/admin/routes", requireAdmin, asyncRoute(async (req, res) => {
 // Edicao substitui nome, motorista e a lista inteira de paradas (mesmo
 // formato de colagem usado no cadastro), para corrigir qualquer texto
 // transcrito errado sem precisar de um formulario por campo.
-app.put("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) => {
+app.put("/api/admin/routes/:routeId", requireAdminSection("rotas"), asyncRoute(async (req, res) => {
   const existingRoute = await getRouteById(req.params.routeId);
   if (!existingRoute) {
     return res.status(404).json({ error: "Rota nao encontrada." });
@@ -2111,7 +2189,7 @@ app.put("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) 
 // Edicao focada em uma unica parada, para corrigir um endereco/contato sem
 // risco de mexer nas demais paradas da mesma rota (que podem ser de outra
 // cidade). E o caminho usado pelo botao "Editar" na busca por cidade/motorista.
-app.put("/api/admin/routes/:routeId/stops/:stopId", requireAdmin, asyncRoute(async (req, res) => {
+app.put("/api/admin/routes/:routeId/stops/:stopId", requireAdminSection("rotas"), asyncRoute(async (req, res) => {
   const route = await getRouteById(req.params.routeId);
   if (!route) {
     return res.status(404).json({ error: "Rota nao encontrada." });
@@ -2140,7 +2218,7 @@ app.put("/api/admin/routes/:routeId/stops/:stopId", requireAdmin, asyncRoute(asy
   return res.json({ stop: serializeRouteStop(updatedStop, route) });
 }));
 
-app.delete("/api/admin/routes/:routeId/stops/:stopId", requireAdmin, asyncRoute(async (req, res) => {
+app.delete("/api/admin/routes/:routeId/stops/:stopId", requireAdminSection("rotas"), asyncRoute(async (req, res) => {
   const route = await getRouteById(req.params.routeId);
   if (!route) {
     return res.status(404).json({ error: "Rota nao encontrada." });
@@ -2155,7 +2233,7 @@ app.delete("/api/admin/routes/:routeId/stops/:stopId", requireAdmin, asyncRoute(
   return res.json({ ok: true });
 }));
 
-app.delete("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, res) => {
+app.delete("/api/admin/routes/:routeId", requireAdminSection("rotas"), asyncRoute(async (req, res) => {
   const route = await getRouteById(req.params.routeId);
   if (!route) {
     return res.status(404).json({ error: "Rota nao encontrada." });
@@ -2165,13 +2243,15 @@ app.delete("/api/admin/routes/:routeId", requireAdmin, asyncRoute(async (req, re
   return res.json({ ok: true });
 }));
 
-app.get("/api/admin/employees", requireAdmin, asyncRoute(async (_req, res) => {
-  const employees = await listEmployees();
+app.get("/api/admin/employees", requireAdminSection("cadastros"), asyncRoute(async (req, res) => {
+  const employees = await listEmployees(req.authUser.role === "admin");
   return res.json({ employees: employees.map(serializeManagedEmployee) });
 }));
 
-app.patch("/api/admin/employees/:employeeId", requireAdmin, asyncRoute(async (req, res) => {
-  const employee = await requireManagedEmployee(req.params.employeeId);
+app.patch("/api/admin/employees/:employeeId", requireAdminSection("cadastros"), asyncRoute(async (req, res) => {
+  const isRealAdmin = req.authUser.role === "admin";
+  const allowedRoles = isRealAdmin ? ["employee", "manager"] : ["employee"];
+  const employee = await requireManagedEmployee(req.params.employeeId, allowedRoles);
   if (!employee) {
     return res.status(404).json({ error: "Funcionario nao encontrado." });
   }
@@ -2187,18 +2267,26 @@ app.patch("/api/admin/employees/:employeeId", requireAdmin, asyncRoute(async (re
     return res.status(409).json({ error: "Ja existe um usuario com essa matricula." });
   }
 
-  const updatedEmployee = await updateEmployeeUser(employee.id, {
+  const updates = {
     name: String(name).trim(),
     employee_id: cleanEmployeeId,
-  });
+  };
+
+  // Permissoes de um gestor so podem ser alteradas pelo admin real.
+  if (isRealAdmin && employee.role === "manager" && req.body.permissions !== undefined) {
+    updates.permissions = normalizePermissionsList(req.body.permissions);
+  }
+
+  const updatedEmployee = await updateEmployeeUser(employee.id, updates, allowedRoles);
 
   await syncRecordSnapshotForUser(employee.id, updatedEmployee);
 
   return res.json({ employee: serializeManagedEmployee(updatedEmployee) });
 }));
 
-app.post("/api/admin/employees/:employeeId/password", requireAdmin, asyncRoute(async (req, res) => {
-  const employee = await requireManagedEmployee(req.params.employeeId);
+app.post("/api/admin/employees/:employeeId/password", requireAdminSection("cadastros"), asyncRoute(async (req, res) => {
+  const allowedRoles = req.authUser.role === "admin" ? ["employee", "manager"] : ["employee"];
+  const employee = await requireManagedEmployee(req.params.employeeId, allowedRoles);
   if (!employee) {
     return res.status(404).json({ error: "Funcionario nao encontrado." });
   }
@@ -2209,12 +2297,13 @@ app.post("/api/admin/employees/:employeeId/password", requireAdmin, asyncRoute(a
   }
 
   const passwordHash = bcrypt.hashSync(String(password), 10);
-  const updatedEmployee = await updateEmployeePassword(employee.id, passwordHash);
+  const updatedEmployee = await updateEmployeePassword(employee.id, passwordHash, allowedRoles);
   return res.json({ employee: serializeManagedEmployee(updatedEmployee) });
 }));
 
-app.delete("/api/admin/employees/:employeeId", requireAdmin, asyncRoute(async (req, res) => {
-  const employee = await requireManagedEmployee(req.params.employeeId);
+app.delete("/api/admin/employees/:employeeId", requireAdminSection("cadastros"), asyncRoute(async (req, res) => {
+  const allowedRoles = req.authUser.role === "admin" ? ["employee", "manager"] : ["employee"];
+  const employee = await requireManagedEmployee(req.params.employeeId, allowedRoles);
   if (!employee) {
     return res.status(404).json({ error: "Funcionario nao encontrado." });
   }
@@ -2224,11 +2313,11 @@ app.delete("/api/admin/employees/:employeeId", requireAdmin, asyncRoute(async (r
     return res.status(409).json({ error: "Funcionario possui registros e nao pode ser excluido." });
   }
 
-  await deleteEmployeeUser(employee.id);
+  await deleteEmployeeUser(employee.id, allowedRoles);
   return res.json({ ok: true });
 }));
 
-app.patch("/api/admin/records/:recordId", requireAdmin, asyncRoute(async (req, res) => {
+app.patch("/api/admin/records/:recordId", requireAdminSection("registros"), asyncRoute(async (req, res) => {
   const record = await getRecordById(req.params.recordId);
   if (!record) {
     return res.status(404).json({ error: "Registro nao encontrado." });
@@ -2292,7 +2381,7 @@ app.patch("/api/admin/records/:recordId", requireAdmin, asyncRoute(async (req, r
   return res.json({ record: updatedRecord, warning });
 }));
 
-app.delete("/api/admin/records/:recordId", requireAdmin, asyncRoute(async (req, res) => {
+app.delete("/api/admin/records/:recordId", requireAdminSection("registros"), asyncRoute(async (req, res) => {
   const record = await getRecordById(req.params.recordId);
   if (!record) {
     return res.status(404).json({ error: "Registro nao encontrado." });
@@ -2336,13 +2425,19 @@ app.post("/api/auth/logout", (req, res) => {
 });
 
 app.get("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
-  const filters = req.authUser.role === "admin" ? normalizeAdminFilters(req.query) : null;
-  const rows = await listRecordsForUser(req.authUser, filters);
+  // Admin sempre ve a empresa toda (comportamento historico, sem precisar de
+  // nenhum parametro). Gestor so ve todo mundo quando ?scope=all e mandado
+  // (a aba admin de Registros manda) - sem isso ele ve so a propria jornada
+  // (usado no cartao de "Meu ponto"), senao os dois modos se misturariam.
+  const user = req.authUser;
+  const wantsAll = user.role === "admin" || (req.query.scope === "all" && canManageAllRecords(user));
+  const filters = wantsAll ? normalizeAdminFilters(req.query) : null;
+  const rows = await listRecordsForUser(user, filters, wantsAll);
   return res.json({ records: rows });
 }));
 
 app.get("/api/me/vehicle-context", requireAuth, asyncRoute(async (req, res) => {
-  if (req.authUser.role !== "employee") {
+  if (!isPunchClockUser(req.authUser)) {
     return res.json({ context: serializeVehicleContext(null) });
   }
 
@@ -2353,7 +2448,7 @@ app.get("/api/me/vehicle-context", requireAuth, asyncRoute(async (req, res) => {
 const EMPLOYEE_WEEK_SUMMARY_DAYS = 7;
 
 app.get("/api/me/summary", requireAuth, asyncRoute(async (req, res) => {
-  if (req.authUser.role !== "employee") {
+  if (!isPunchClockUser(req.authUser)) {
     return res.json({ daysWorked: 0, workedHours: "00:00", overtimeHours: "00:00", windowDays: EMPLOYEE_WEEK_SUMMARY_DAYS });
   }
 
@@ -2383,7 +2478,7 @@ app.get("/api/me/summary", requireAuth, asyncRoute(async (req, res) => {
 
 app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
   const user = req.authUser;
-  if (user.role !== "employee") {
+  if (!isPunchClockUser(user)) {
     return res.status(403).json({ error: "Somente funcionarios registram ponto." });
   }
 
@@ -2491,7 +2586,7 @@ app.post("/api/me/records", requireAuth, asyncRoute(async (req, res) => {
 
 app.post("/api/me/vehicle-transfers", requireAuth, asyncRoute(async (req, res) => {
   const user = req.authUser;
-  if (user.role !== "employee") {
+  if (!isPunchClockUser(user)) {
     return res.status(403).json({ error: "Somente funcionarios podem trocar de veiculo." });
   }
 
@@ -2615,7 +2710,7 @@ app.post("/api/me/vehicle-transfers", requireAuth, asyncRoute(async (req, res) =
   });
 }));
 
-app.get("/api/admin/summary", requireAdmin, asyncRoute(async (_req, res) => {
+app.get("/api/admin/summary", requireAdminSection("overview"), asyncRoute(async (_req, res) => {
   const filters = normalizeAdminFilters(_req.query);
   const baseFilters = filters.vehiclePlate ? getFiltersWithoutVehicle(filters) : filters;
   const rows = await listAllRecordsAscending(baseFilters);
@@ -2661,7 +2756,7 @@ app.get("/api/admin/summary", requireAdmin, asyncRoute(async (_req, res) => {
   });
 }));
 
-app.get("/api/admin/alerts", requireAdmin, asyncRoute(async (req, res) => {
+app.get("/api/admin/alerts", requireAdminSection("overview"), asyncRoute(async (req, res) => {
   const filters = normalizeAdminFilters(req.query);
   // As pendencias sempre olham a janela recente inteira. Recortar por periodo ou
   // por veiculo esconderia a Entrada ou a Saida de uma jornada e geraria alerta
@@ -2688,7 +2783,7 @@ app.get("/api/admin/alerts", requireAdmin, asyncRoute(async (req, res) => {
   });
 }));
 
-app.get("/api/admin/export.csv", requireAdmin, asyncRoute(async (req, res) => {
+app.get("/api/admin/export.csv", requireAdminSection("registros"), asyncRoute(async (req, res) => {
   const filters = normalizeAdminFilters(req.query);
   const rows = await listAllRecordsAscending(filters);
 
@@ -2732,7 +2827,7 @@ app.get("/api/admin/export.csv", requireAdmin, asyncRoute(async (req, res) => {
   return res.send(csv);
 }));
 
-app.get("/api/admin/export.xlsx", requireAdmin, asyncRoute(async (req, res) => {
+app.get("/api/admin/export.xlsx", requireAdminSection("registros"), asyncRoute(async (req, res) => {
   const filters = normalizeAdminFilters(req.query);
   const baseFilters = filters.vehiclePlate ? getFiltersWithoutVehicle(filters) : filters;
   const rows = await listAllRecordsAscending(baseFilters);
@@ -2742,7 +2837,7 @@ app.get("/api/admin/export.xlsx", requireAdmin, asyncRoute(async (req, res) => {
   await sendWorkbookResponse(res, workbook, filters);
 }));
 
-app.post("/api/admin/export.xlsx/link", requireAdmin, asyncRoute(async (req, res) => {
+app.post("/api/admin/export.xlsx/link", requireAdminSection("registros"), asyncRoute(async (req, res) => {
   const filters = normalizeAdminFilters(req.body || {});
   const token = createSignedExportToken(filters);
   return res.json({ url: `/api/admin/export.xlsx/direct?token=${encodeURIComponent(token)}` });

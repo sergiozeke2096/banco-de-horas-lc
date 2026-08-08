@@ -3,7 +3,8 @@ create table if not exists public.users (
   name text not null,
   employee_id text not null unique,
   password_hash text not null,
-  role text not null check (role in ('admin', 'employee')),
+  role text not null check (role in ('admin', 'employee', 'manager')),
+  permissions text[] not null default '{}',
   created_at timestamptz not null default now()
 );
 
@@ -69,6 +70,10 @@ create table if not exists public.route_stops (
   stop_order integer not null default 0,
   created_at timestamptz not null default now()
 );
+
+alter table public.users drop constraint if exists users_role_check;
+alter table public.users add constraint users_role_check check (role in ('admin', 'employee', 'manager'));
+alter table public.users add column if not exists permissions text[] not null default '{}';
 
 alter table public.time_records add column if not exists vehicle_plate text;
 alter table public.time_records add column if not exists vehicle_km double precision;

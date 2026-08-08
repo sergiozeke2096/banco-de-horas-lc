@@ -52,7 +52,13 @@
         <div class="app-brand-center" aria-hidden="true">
           <img class="app-brand-image" src="/logo-lc.jpg" alt="LC Transportes">
         </div>
-        <button class="ghost" id="logoutButton">Sair</button>
+        <div class="topbar-actions">
+          <div class="manager-view-switch hidden" id="managerViewSwitch">
+            <button type="button" class="ghost" id="managerViewPunchButton" data-manager-view="punch">Meu ponto</button>
+            <button type="button" class="ghost" id="managerViewAdminButton" data-manager-view="admin">Painel administrativo</button>
+          </div>
+          <button class="ghost" id="logoutButton">Sair</button>
+        </div>
       </div>
 
       <section class="card hidden" id="employeePanel">
@@ -236,6 +242,22 @@
                 Senha
                 <input id="registerPassword" type="password" placeholder="Crie uma senha" required>
               </label>
+              <div class="hidden" id="registerRoleBlock">
+                <label>
+                  Tipo de conta
+                  <select id="registerRole">
+                    <option value="employee">Funcionario (so bate ponto)</option>
+                    <option value="manager">Gestor (bate ponto + acesso a areas do painel)</option>
+                  </select>
+                </label>
+                <div class="hidden permission-checkbox-group" id="registerPermissionsGroup">
+                  <p class="muted">Areas liberadas para o gestor</p>
+                  <label class="checkbox-inline"><input type="checkbox" class="register-permission" value="overview"> Visao geral</label>
+                  <label class="checkbox-inline"><input type="checkbox" class="register-permission" value="registros"> Registros</label>
+                  <label class="checkbox-inline"><input type="checkbox" class="register-permission" value="cadastros"> Cadastros</label>
+                  <label class="checkbox-inline"><input type="checkbox" class="register-permission" value="rotas"> Rotas</label>
+                </div>
+              </div>
               <button type="submit" class="secondary">Cadastrar funcionario</button>
             </form>
           </article>
@@ -344,6 +366,13 @@
                   Matricula
                   <input id="editEmployeeId" type="text" placeholder="Ex.: 1024" required>
                 </label>
+                <div class="hidden permission-checkbox-group" id="editPermissionsGroup">
+                  <p class="muted">Areas liberadas para este gestor</p>
+                  <label class="checkbox-inline"><input type="checkbox" class="edit-permission" value="overview"> Visao geral</label>
+                  <label class="checkbox-inline"><input type="checkbox" class="edit-permission" value="registros"> Registros</label>
+                  <label class="checkbox-inline"><input type="checkbox" class="edit-permission" value="cadastros"> Cadastros</label>
+                  <label class="checkbox-inline"><input type="checkbox" class="edit-permission" value="rotas"> Rotas</label>
+                </div>
                 <button type="submit" class="secondary">Salvar dados</button>
               </form>
               <form id="employeePasswordForm" class="stack employee-password-form">
@@ -379,11 +408,9 @@
                 Nome da rota
                 <input id="registerRouteName" type="text" placeholder="Ex.: Rota 1 - 06/08/2026" required>
               </label>
-              <label>
-                Paradas (uma por linha: Operacao, Cidade, Cliente, Endereco, Contato)
-                <textarea id="registerRouteStops" class="route-addresses-input" rows="10" placeholder="Cole aqui direto do Excel/print. Uma parada por linha, campos separados por Tab ou por |&#10;Pick-up | Blumenau | Loja Vestis | Rua Dr. Pedro Zimmermann, 2833 | (47) 99920-8255&#10;Minidrop | Joinville | SC-W-MD009 | Rua Boehmerwald N 2788 | 47991770696" required></textarea>
-              </label>
-              <p class="muted route-form-hint">Cidade e Endereco sao obrigatorios em cada linha. Motorista, Operacao, Cliente e Contato podem ficar em branco. Para corrigir uma parada ja cadastrada, use o botao Editar nos resultados da busca abaixo.</p>
+              <div class="route-stops-field-list" id="routeStopsFieldList"></div>
+              <button type="button" class="ghost" id="addRouteStopButton">+ Adicionar parada</button>
+              <p class="muted route-form-hint">Cidade e Endereco sao obrigatorios em cada parada. Motorista, Operacao, Cliente e Contato podem ficar em branco. Para corrigir uma parada ja cadastrada, use o botao Editar nos resultados da busca abaixo.</p>
               <button type="submit" class="secondary">Salvar rota</button>
             </form>
             <p class="feedback manager-feedback" id="routeManagerMessage"></p>
@@ -396,6 +423,7 @@
               <div class="filter-actions">
                 <button type="button" class="secondary" id="searchRoutesButton">Buscar enderecos</button>
                 <button type="button" class="ghost" id="clearRouteSearchButton">Limpar busca</button>
+                <button type="button" class="ghost" id="addNewAddressButton">+ Novo endereco</button>
               </div>
             </div>
             <div class="routes-results" id="routesResults">
@@ -585,6 +613,35 @@
     </form>
   </dialog>
 
+  <template id="routeStopFieldTemplate">
+    <div class="route-stop-field-card">
+      <div class="route-stop-field-head">
+        <span class="route-stop-field-title"></span>
+        <button type="button" class="ghost small route-stop-field-remove">Remover parada</button>
+      </div>
+      <label>
+        Operacao
+        <input type="text" class="route-stop-operation" placeholder="Ex.: Pick-up, Minidrop, Magazord">
+      </label>
+      <label>
+        Cidade
+        <input type="text" class="route-stop-city" placeholder="Ex.: Joinville">
+      </label>
+      <label>
+        Cliente / Empresa
+        <input type="text" class="route-stop-client" placeholder="Ex.: Loja Vestis">
+      </label>
+      <label>
+        Endereco
+        <input type="text" class="route-stop-address" placeholder="Rua, numero, complemento">
+      </label>
+      <label>
+        Contato
+        <input type="text" class="route-stop-contact" placeholder="Ex.: (47) 99920-8255">
+      </label>
+    </div>
+  </template>
+
   <dialog class="vehicle-dialog" id="routeStopEditDialog">
     <form class="vehicle-form" id="routeStopEditForm" method="dialog">
       <div>
@@ -622,6 +679,41 @@
     </form>
   </dialog>
 
-  <script src="/app.js?v=20260504-01"></script>
+  <dialog class="vehicle-dialog" id="newAddressDialog">
+    <form class="vehicle-form" id="newAddressForm" method="dialog">
+      <div>
+        <p class="eyebrow small">Novo endereco</p>
+        <h3>Adicionar endereco</h3>
+        <p class="muted">Cadastra um endereco avulso (cidade nova ou ja existente), sem montar uma rota.</p>
+      </div>
+      <label>
+        Operacao
+        <input id="newAddressOperation" type="text" placeholder="Ex.: Pick-up, Minidrop, Magazord">
+      </label>
+      <label>
+        Cidade
+        <input id="newAddressCity" type="text" placeholder="Ex.: Joinville" required>
+      </label>
+      <label>
+        Cliente / Empresa
+        <input id="newAddressClient" type="text" placeholder="Ex.: Mirela MC Estetica">
+      </label>
+      <label>
+        Endereco
+        <input id="newAddressAddress" type="text" placeholder="Rua, numero, complemento" required>
+      </label>
+      <label>
+        Contato
+        <input id="newAddressContact" type="text" placeholder="Ex.: (47) 99999-9999">
+      </label>
+      <p class="feedback vehicle-feedback" id="newAddressMessage"></p>
+      <div class="dialog-actions">
+        <button type="button" class="ghost" id="newAddressCancelButton">Cancelar</button>
+        <button type="submit" class="primary">Salvar endereco</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/app.js?v=20260807-01"></script>
 </body>
 </html>

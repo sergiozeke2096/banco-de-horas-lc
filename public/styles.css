@@ -279,11 +279,6 @@ textarea {
   line-height: 1.5;
 }
 
-.route-addresses-input {
-  font-family: "Consolas", "Courier New", monospace;
-  font-size: 0.88rem;
-}
-
 select {
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -374,6 +369,53 @@ button:disabled,
   flex-wrap: wrap;
   gap: 16px;
   margin-bottom: 18px;
+}
+
+.permission-checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+
+.checkbox-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.checkbox-inline input {
+  width: auto;
+}
+
+.manager-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--green);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  margin-left: 6px;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.manager-view-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.manager-view-switch .active {
+  background: var(--green);
+  color: #ffffff;
 }
 
 .app-brand-center {
@@ -913,10 +955,47 @@ button:disabled,
   font-size: 0.8rem;
 }
 
+.route-stops-field-list {
+  display: grid;
+  gap: 14px;
+}
+
+.route-stop-field-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.route-stop-field-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.route-stop-field-title {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.route-stop-field-remove.small {
+  padding: 8px 12px;
+  min-height: auto;
+  font-size: 0.8rem;
+}
+
 .route-card-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.route-card-actions .table-action {
+  width: auto;
 }
 
 .route-stops-list {
