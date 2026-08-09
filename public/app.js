@@ -38,6 +38,9 @@ const state = {
     dateFrom: "",
     dateTo: "",
   },
+  chatOpen: false,
+  chatMessages: [],
+  chatSending: false,
 };
 
 const APP_TIME_ZONE = "America/Sao_Paulo";
@@ -235,6 +238,14 @@ const recordEditKmInput = document.querySelector("#recordEditKmInput");
 const recordEditMessage = document.querySelector("#recordEditMessage");
 const recordEditCancelButton = document.querySelector("#recordEditCancelButton");
 const recordEditDeleteButton = document.querySelector("#recordEditDeleteButton");
+const chatFab = document.querySelector("#chatFab");
+const chatPanel = document.querySelector("#chatPanel");
+const chatCloseButton = document.querySelector("#chatCloseButton");
+const chatMessagesEl = document.querySelector("#chatMessages");
+const chatForm = document.querySelector("#chatForm");
+const chatInput = document.querySelector("#chatInput");
+const chatSendButton = document.querySelector("#chatSendButton");
+const chatFeedback = document.querySelector("#chatFeedback");
 const actionButtons = [...document.querySelectorAll(".action-button")];
 let vehicleDialogResolver = null;
 let vehicleTransferDialogResolver = null;
@@ -2443,6 +2454,7 @@ function renderSession() {
   authPanel.classList.toggle("hidden", loggedIn);
   appPanel.classList.toggle("hidden", !loggedIn);
   renderApkUpdateDialog();
+  renderChatVisibility();
 
   if (!loggedIn) {
     return;
@@ -2844,6 +2856,7 @@ async function handleLogin(event) {
 
 async function handleLogout() {
   await api("/api/auth/logout", { method: "POST" });
+  resetChat();
   state.user = null;
   state.records = [];
   state.summary = [];
@@ -3641,6 +3654,93 @@ function clearOfflineSnapshot() {
   }
 }
 
+function renderChatVisibility() {
+  if (!chatFab || !chatPanel) {
+    return;
+  }
+  const loggedIn = Boolean(state.user);
+  chatFab.classList.toggle("hidden", !loggedIn || state.chatOpen);
+  chatPanel.classList.toggle("hidden", !loggedIn || !state.chatOpen);
+}
+
+function renderChatMessages() {
+  if (!chatMessagesEl) {
+    return;
+  }
+  chatMessagesEl.innerHTML = "";
+  for (const entry of state.chatMessages) {
+    const bubble = document.createElement("div");
+    bubble.className = `chat-bubble chat-bubble-${entry.role}${entry.pending ? " chat-bubble-pending" : ""}`;
+    bubble.textContent = entry.text;
+    chatMessagesEl.appendChild(bubble);
+  }
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+}
+
+function setChatFeedback(message) {
+  if (!chatFeedback) {
+    return;
+  }
+  chatFeedback.textContent = message || "";
+  chatFeedback.classList.toggle("hidden", !message);
+}
+
+function handleOpenChat() {
+  state.chatOpen = true;
+  renderChatVisibility();
+  if (!state.chatMessages.length) {
+    state.chatMessages.push({ role: "assistant", text: "Oi! Pode perguntar sobre suas horas, registros de ponto ou rotas." });
+    renderChatMessages();
+  }
+  chatInput?.focus();
+}
+
+function handleCloseChat() {
+  state.chatOpen = false;
+  renderChatVisibility();
+}
+
+function resetChat() {
+  state.chatOpen = false;
+  state.chatMessages = [];
+  state.chatSending = false;
+  setChatFeedback("");
+  renderChatVisibility();
+}
+
+async function handleChatSubmit(event) {
+  event.preventDefault();
+  const text = chatInput.value.trim();
+  if (!text || state.chatSending) {
+    return;
+  }
+
+  const historyForRequest = state.chatMessages
+    .filter((entry) => !entry.pending)
+    .map((entry) => ({ role: entry.role, text: entry.text }));
+
+  state.chatMessages.push({ role: "user", text });
+  chatInput.value = "";
+  setChatFeedback("");
+  state.chatSending = true;
+  chatSendButton.disabled = true;
+  renderChatMessages();
+
+  try {
+    const response = await api("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ message: text, history: historyForRequest }),
+    });
+    state.chatMessages.push({ role: "assistant", text: response.reply });
+  } catch (error) {
+    setChatFeedback(error.message || "Nao foi possivel falar com o assistente agora.");
+  } finally {
+    state.chatSending = false;
+    chatSendButton.disabled = false;
+    renderChatMessages();
+  }
+}
+
 function renderOfflineBanner() {
   if (!offlineCacheBanner) {
     return;
@@ -3959,6 +4059,9 @@ bindEvent(newAddressForm, "submit", handleNewAddressSubmit);
 bindEvent(newAddressCancelButton, "click", handleNewAddressCancel);
 bindEvent(routeStopEditDialog, "cancel", handleRouteStopEditCancel);
 bindEvent(routeStopEditAddress, "input", updateRouteStopEditMapsLink);
+bindEvent(chatFab, "click", handleOpenChat);
+bindEvent(chatCloseButton, "click", handleCloseChat);
+bindEvent(chatForm, "submit", handleChatSubmit);
 bindEvent(employeeManageSearchInput, "keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();

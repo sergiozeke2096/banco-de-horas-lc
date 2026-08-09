@@ -9,6 +9,7 @@ const { computeSummary, aggregateSummaryByEmployee, createWorkbook, getDailyWork
 const { detectPendingAlerts, summarizeAlerts, DEFAULT_ALERT_THRESHOLDS } = require("./lib/pending-alerts");
 const { startWhatsAppBot, getConnectionState: getWhatsAppConnectionState } = require("./lib/whatsapp-bot");
 const QRCode = require("qrcode");
+const Anthropic = require("@anthropic-ai/sdk");
 
 const LEGACY_ADMIN_NAME = "Lc tranporte";
 const SESSION_SECRET = process.env.SESSION_SECRET || "timecard-professional-secret";
@@ -19,6 +20,8 @@ const SIGNED_EXPORT_DURATION_MS = 1000 * 60 * 5;
 const SUPABASE_PAGE_SIZE = 1000;
 const TIME_RECORD_ACTIONS = ["Entrada", "Saida para almoco", "Retorno do almoco", "Saida"];
 const ADMIN_SECTIONS = ["overview", "registros", "cadastros", "rotas"];
+const CHAT_MODEL = "claude-opus-5";
+const CHAT_MAX_TURNS = 6;
 const APP_TIME_ZONE = "America/Sao_Paulo";
 const localDateFormatter = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeZone: APP_TIME_ZONE });
 const localTimeFormatter = new Intl.DateTimeFormat("pt-BR", { timeStyle: "medium", timeZone: APP_TIME_ZONE });
@@ -345,23 +348,42 @@ function requireAdmin(req, res, next) {
 // Libera pro admin (sempre) ou pra um gestor com a area especifica liberada
 // em `permissions`. Usada nas rotas administrativas que um gestor pode
 // acessar de forma parcial, ao contrario de requireAdmin (tudo ou nada).
+// Mesma regra usada pelo middleware requireAdminSection, mas como funcao
+// pura para o chat (que decide quais ferramentas oferecer a cada usuario
+// sem passar por uma rota Express).
+function canAccessSection(user, section) {
+  if (!user) {
+    return false;
+  }
+
+  if (user.role === "admin") {
+    return true;
+  }
+
+  return user.role === "manager" && Array.isArray(user.permissions) && user.permissions.includes(section);
+}
+
 function requireAdminSection(section) {
   return (req, res, next) => {
-    const user = req.authUser;
-    if (!user) {
-      return res.status(403).json({ error: "Acesso restrito ao administrador." });
+    if (!canAccessSection(req.authUser, section)) {
+      return res.status(403).json({ error: "Voce nao tem permissao para acessar esta area." });
     }
-
-    if (user.role === "admin") {
-      return next();
-    }
-
-    if (user.role === "manager" && Array.isArray(user.permissions) && user.permissions.includes(section)) {
-      return next();
-    }
-
-    return res.status(403).json({ error: "Voce nao tem permissao para acessar esta area." });
+    return next();
   };
+}
+
+let anthropicClient;
+function getAnthropicClient() {
+  const apiKey = String(process.env.ANTHROPIC_API_KEY || "").trim();
+  if (!apiKey) {
+    return null;
+  }
+
+  if (!anthropicClient) {
+    anthropicClient = new Anthropic({ apiKey });
+  }
+
+  return anthropicClient;
 }
 
 async function runQuery(query) {
@@ -2974,6 +2996,225 @@ app.get("/api/admin/export.xlsx/direct", asyncRoute(async (req, res) => {
   const workloadOverridesById = await buildWorkloadOverridesMap();
   const workbook = createWorkbook(rows, transfers, workloadOverridesById);
   await sendWorkbookResponse(res, workbook, filters);
+}));
+
+// Assistente de chat (Claude). So ferramentas de LEITURA - o chat nunca bate
+// ponto, edita registro nem cadastra/exclui nada; isso continua so pelas
+// telas normais. Cada ferramenta e liberada de acordo com o papel/permissao
+// de quem esta conversando, igual as rotas HTTP equivalentes.
+function buildChatTools(user) {
+  const tools = [];
+
+  if (isPunchClockUser(user)) {
+    tools.push({
+      name: "get_my_week_summary",
+      description: "Devolve o resumo dos ultimos 7 dias do proprio funcionario que esta conversando: dias trabalhados, horas trabalhadas, horas extras e a carga horaria diaria dele. Use para perguntas como 'quantas horas trabalhei essa semana' ou 'tenho hora extra hoje'.",
+      input_schema: { type: "object", properties: {}, additionalProperties: false },
+    });
+    tools.push({
+      name: "get_my_recent_records",
+      description: "Lista os registros de ponto mais recentes do proprio funcionario (data, hora, tipo da batida e veiculo), do mais novo para o mais antigo. Use para perguntas como 'quando eu bati ponto hoje' ou 'qual foi meu ultimo registro'.",
+      input_schema: {
+        type: "object",
+        properties: {
+          limit: { type: "integer", description: "Quantidade de registros a devolver (padrao 10, maximo 30).", minimum: 1, maximum: 30 },
+        },
+        additionalProperties: false,
+      },
+    });
+  }
+
+  if (canAccessSection(user, "overview")) {
+    tools.push({
+      name: "get_company_hours_summary",
+      description: "Resumo agregado de horas, horas extras e KM da empresa (ultimas 48h, mesma janela padrao do painel admin). Pode filtrar por matricula de um funcionario especifico. Use para perguntas administrativas como 'quantas horas extras a empresa teve' ou 'quantas horas o funcionario X fez'.",
+      input_schema: {
+        type: "object",
+        properties: {
+          employeeId: { type: "string", description: "Matricula do funcionario para filtrar (opcional; sem isso devolve a empresa toda)." },
+        },
+        additionalProperties: false,
+      },
+    });
+    tools.push({
+      name: "get_pending_alerts",
+      description: "Lista as pendencias atuais detectadas pelo sistema (jornada aberta, almoco sem retorno, jornada longa, sem intervalo, sequencia inconsistente, funcionario sem bater ponto). Use para perguntas como 'tem alguma pendencia' ou 'algum funcionario esqueceu de bater ponto'.",
+      input_schema: { type: "object", properties: {}, additionalProperties: false },
+    });
+  }
+
+  if (canAccessSection(user, "rotas")) {
+    tools.push({
+      name: "search_routes_by_city",
+      description: "Busca todos os enderecos de entrega/coleta cadastrados numa cidade, juntando as rotas que tiverem parada la. Use para perguntas como 'quais rotas tem em Blumenau' ou 'tem entrega em Jaragua do Sul'.",
+      input_schema: {
+        type: "object",
+        properties: {
+          city: { type: "string", description: "Nome da cidade a buscar." },
+        },
+        required: ["city"],
+        additionalProperties: false,
+      },
+    });
+  }
+
+  return tools;
+}
+
+async function executeChatTool(name, input, user) {
+  if (name === "get_my_week_summary" && isPunchClockUser(user)) {
+    const todayStart = parseLocalDate(localDateFormatter.format(new Date()));
+    const fromDate = new Date(todayStart.getTime() - (EMPLOYEE_WEEK_SUMMARY_DAYS - 1) * 24 * 60 * 60 * 1000);
+    const isWithinWeek = (row) => {
+      const rowDate = parseLocalDate(row.local_date) || new Date(row.recorded_at);
+      return rowDate.getTime() >= fromDate.getTime() && rowDate.getTime() <= todayStart.getTime();
+    };
+    const records = (await listUserRecordsAscending(user.id)).filter(isWithinWeek);
+    const transfers = (await listUserVehicleTransfersAscending(user.id)).filter(isWithinWeek);
+    const workloadOverridesById = await buildWorkloadOverridesMap();
+    const { employees } = aggregateSummaryByEmployee(computeSummary(records, transfers, workloadOverridesById));
+    const own = employees[0] || { daysWorked: 0, workedHours: "00:00", overtimeHours: "00:00" };
+    return {
+      daysWorked: own.daysWorked,
+      workedHours: own.workedHours,
+      overtimeHours: own.overtimeHours,
+      windowDays: EMPLOYEE_WEEK_SUMMARY_DAYS,
+      dailyWorkloadMinutes: getDailyWorkloadMinutes(user.employeeId, workloadOverridesById),
+    };
+  }
+
+  if (name === "get_my_recent_records" && isPunchClockUser(user)) {
+    const limit = Math.min(Math.max(Number(input?.limit) || 10, 1), 30);
+    const records = await listRecordsForUser(user, null, false);
+    return {
+      records: records.slice(0, limit).map((record) => ({
+        date: record.local_date,
+        time: record.local_time,
+        action: record.action,
+        vehiclePlate: record.vehicle_plate || null,
+      })),
+    };
+  }
+
+  if (name === "get_company_hours_summary" && canAccessSection(user, "overview")) {
+    const filters = normalizeAdminFilters({ employeeId: input?.employeeId || "" });
+    const rows = await listAllRecordsAscending(filters);
+    const transfers = await listAllVehicleTransfersAscending(filters, { includeVehicle: false });
+    const workloadOverridesById = await buildWorkloadOverridesMap();
+    const computedSummary = computeSummary(rows, transfers, workloadOverridesById);
+    const recentSummary = filterSummaryWithinLastHours(computedSummary, 48);
+    const { employees: aggregates, company: companyTotals } = aggregateSummaryByEmployee(recentSummary);
+    return { windowHours: 48, aggregates, companyTotals };
+  }
+
+  if (name === "get_pending_alerts" && canAccessSection(user, "overview")) {
+    const records = await listAllRecordsAscending();
+    const transfers = await listAllVehicleTransfersAscending(null, { includeVehicle: false });
+    const employees = (await listEmployees()).map(serializeManagedEmployee);
+    const alerts = detectPendingAlerts({ records, transfers, employees, now: Date.now() });
+    return { counts: summarizeAlerts(alerts), alerts: alerts.slice(0, 20) };
+  }
+
+  if (name === "search_routes_by_city" && canAccessSection(user, "rotas")) {
+    const city = String(input?.city || "").trim();
+    if (!city) {
+      return { error: "Informe a cidade a buscar." };
+    }
+    const cityKey = normalizeCityKey(city);
+    const [allRoutes, allStops] = await Promise.all([listAllRoutes(), listAllRouteStops()]);
+    const routeById = new Map(allRoutes.map((route) => [String(route.id), route]));
+    const stops = allStops
+      .filter((stop) => normalizeCityKey(stop.city) === cityKey)
+      .map((stop) => serializeRouteStop(stop, routeById.get(String(stop.route_id))));
+    return { city, stopCount: stops.length, stops: stops.slice(0, 25) };
+  }
+
+  return { error: "Ferramenta indisponivel ou sem permissao para este usuario." };
+}
+
+function buildChatSystemPrompt(user) {
+  const role = user.role === "admin" ? "administrador" : user.role === "manager" ? "gestor" : "funcionario";
+  return [
+    `Voce e o assistente do app "Banco de Horas LC / Cartao de Ponto LC Transporte", conversando com ${user.name} (${role}).`,
+    "Responda em portugues do Brasil, de forma direta e curta.",
+    "Use as ferramentas disponiveis para consultar dados reais antes de responder sobre horas, registros, pendencias ou rotas - nunca invente numeros ou enderecos.",
+    "Voce so consegue LER dados. Nao pode bater ponto, editar registros, cadastrar ou excluir nada; se pedirem isso, oriente a pessoa a usar as telas normais do app.",
+    "Se uma ferramenta relevante nao estiver disponivel para este usuario, explique que ele nao tem permissao para aquela informacao.",
+  ].join(" ");
+}
+
+async function runChatConversation(user, priorMessages, userMessage) {
+  const client = getAnthropicClient();
+  if (!client) {
+    throw new Error("Chat indisponivel: ANTHROPIC_API_KEY nao configurada no servidor.");
+  }
+
+  const tools = buildChatTools(user);
+  const messages = [
+    ...priorMessages.map((entry) => ({ role: entry.role, content: entry.text })),
+    { role: "user", content: userMessage },
+  ];
+
+  for (let turn = 0; turn < CHAT_MAX_TURNS; turn += 1) {
+    const response = await client.messages.create({
+      model: CHAT_MODEL,
+      max_tokens: 1024,
+      system: buildChatSystemPrompt(user),
+      tools: tools.length ? tools : undefined,
+      output_config: { effort: "low" },
+      messages,
+    });
+
+    messages.push({ role: "assistant", content: response.content });
+
+    if (response.stop_reason !== "tool_use") {
+      const reply = response.content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("\n")
+        .trim();
+      return reply || "Nao consegui gerar uma resposta agora. Tente reformular a pergunta.";
+    }
+
+    const toolResults = [];
+    for (const block of response.content) {
+      if (block.type !== "tool_use") {
+        continue;
+      }
+      let result;
+      try {
+        result = await executeChatTool(block.name, block.input, user);
+      } catch (error) {
+        result = { error: error.message || "Falha ao executar a ferramenta." };
+      }
+      toolResults.push({ type: "tool_result", tool_use_id: block.id, content: JSON.stringify(result) });
+    }
+    messages.push({ role: "user", content: toolResults });
+  }
+
+  return "Essa pergunta precisou de muitas consultas e eu nao terminei a tempo. Pode tentar de forma mais especifica?";
+}
+
+app.post("/api/chat", requireAuth, asyncRoute(async (req, res) => {
+  const message = String(req.body?.message || "").trim();
+  if (!message) {
+    return res.status(400).json({ error: "Mensagem vazia." });
+  }
+
+  const rawHistory = Array.isArray(req.body?.history) ? req.body.history : [];
+  const history = rawHistory
+    .filter((entry) => entry && (entry.role === "user" || entry.role === "assistant") && typeof entry.text === "string" && entry.text.trim())
+    .slice(-20)
+    .map((entry) => ({ role: entry.role, text: entry.text.trim() }));
+
+  let reply;
+  try {
+    reply = await runChatConversation(req.authUser, history, message);
+  } catch (error) {
+    return res.status(503).json({ error: error.message || "Chat indisponivel no momento." });
+  }
+
+  return res.json({ reply });
 }));
 
 app.use((error, _req, res, _next) => {

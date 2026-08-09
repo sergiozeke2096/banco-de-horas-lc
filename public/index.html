@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LC Transporte | Cartao de Ponto</title>
-  <link rel="stylesheet" href="/styles.css?v=20260808-01">
+  <link rel="stylesheet" href="/styles.css?v=20260809-02">
 </head>
 <body>
   <img class="watermark-logo" src="/logo-lc.jpg" alt="" aria-hidden="true">
@@ -730,6 +730,25 @@
     </form>
   </dialog>
 
-  <script src="/app.js?v=20260808-01"></script>
+  <button type="button" id="chatFab" class="chat-fab hidden" aria-label="Abrir assistente">
+    <span class="chat-fab-icon">💬</span>
+  </button>
+  <section id="chatPanel" class="chat-panel hidden" aria-label="Assistente do app">
+    <header class="chat-panel-head">
+      <div>
+        <strong>Assistente</strong>
+        <p class="chat-panel-subtitle">Pergunte sobre suas horas, registros ou rotas</p>
+      </div>
+      <button type="button" class="ghost chat-close" id="chatCloseButton" aria-label="Fechar assistente">✕</button>
+    </header>
+    <div id="chatMessages" class="chat-messages"></div>
+    <p class="feedback chat-feedback hidden" id="chatFeedback"></p>
+    <form id="chatForm" class="chat-form">
+      <input id="chatInput" type="text" placeholder="Escreva sua pergunta..." autocomplete="off" required>
+      <button type="submit" class="primary" id="chatSendButton">Enviar</button>
+    </form>
+  </section>
+
+  <script src="/app.js?v=20260809-01"></script>
 </body>
 </html>

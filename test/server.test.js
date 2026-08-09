@@ -2279,3 +2279,36 @@ test("funcionario nao consegue editar nem excluir parada individual", async () =
   })).status, 403);
   assert.equal((await employeeAgent.delete(`/api/admin/routes/${routeId}/stops/${stopId}`)).status, 403);
 });
+
+test("chat exige login", async () => {
+  const response = await request(app).post("/api/chat").send({ message: "oi" });
+  assert.equal(response.status, 401);
+});
+
+test("chat sem ANTHROPIC_API_KEY configurada devolve erro amigavel", async () => {
+  const previousKey = process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+
+  try {
+    const adminAgent = request.agent(app);
+    await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+
+    const response = await adminAgent.post("/api/chat").send({ message: "quantas horas eu fiz essa semana?" });
+    assert.equal(response.status, 503);
+    assert.match(response.body.error, /ANTHROPIC_API_KEY/);
+  } finally {
+    if (previousKey === undefined) {
+      delete process.env.ANTHROPIC_API_KEY;
+    } else {
+      process.env.ANTHROPIC_API_KEY = previousKey;
+    }
+  }
+});
+
+test("chat rejeita mensagem vazia", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+
+  const response = await adminAgent.post("/api/chat").send({ message: "   " });
+  assert.equal(response.status, 400);
+});
