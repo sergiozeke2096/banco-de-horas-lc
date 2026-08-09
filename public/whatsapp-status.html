@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LC Transporte | Conexao do bot de WhatsApp</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1c2b24;
+      --muted: #5b6b63;
+      --line: #dfe6e1;
+      --surface: #ffffff;
+      --bg: #f4f7f5;
+      --green: #2f6f4f;
+      --red: #a33f33;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      text-align: center;
+    }
+
+    main {
+      max-width: 420px;
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 28px;
+    }
+
+    h1 {
+      font-size: 1.2rem;
+      margin-bottom: 4px;
+    }
+
+    p.muted {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-top: 0;
+    }
+
+    #qrBox img {
+      width: 100%;
+      max-width: 320px;
+      height: auto;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+    }
+
+    #statusText {
+      font-weight: 700;
+      margin-top: 16px;
+    }
+
+    #statusText.connected { color: var(--green); }
+    #statusText.error { color: var(--red); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Conexao do bot de WhatsApp</h1>
+    <p class="muted">Escaneie com o WhatsApp do numero dedicado ao bot: Configuracoes -> Aparelhos conectados -> Conectar um aparelho.</p>
+    <div id="qrBox">
+      <p class="muted">Carregando...</p>
+    </div>
+    <p id="statusText"></p>
+  </main>
+
+  <script>
+    async function poll() {
+      const qrBox = document.querySelector("#qrBox");
+      const statusText = document.querySelector("#statusText");
+
+      try {
+        const response = await fetch("/api/admin/whatsapp/status");
+        if (response.status === 403) {
+          qrBox.innerHTML = "";
+          statusText.textContent = "Acesso restrito ao administrador. Faca login como admin nesta aba.";
+          statusText.className = "error";
+          return;
+        }
+
+        const data = await response.json();
+
+        if (data.status === "connected") {
+          qrBox.innerHTML = "";
+          statusText.textContent = "Conectado! O bot ja esta pronto pra receber mensagens.";
+          statusText.className = "connected";
+          return;
+        }
+
+        if (data.status === "qr" && data.qrDataUrl) {
+          qrBox.innerHTML = `<img src="${data.qrDataUrl}" alt="QR code de pareamento">`;
+          statusText.textContent = "Aguardando leitura do QR code...";
+          statusText.className = "";
+        } else {
+          qrBox.innerHTML = "";
+          statusText.textContent = "Bot desconectado. Aguardando gerar um novo QR code...";
+          statusText.className = "";
+        }
+      } catch (error) {
+        statusText.textContent = "Erro ao consultar status: " + error.message;
+        statusText.className = "error";
+      }
+
+      window.setTimeout(poll, 3000);
+    }
+
+    poll();
+  </script>
+</body>
+</html>

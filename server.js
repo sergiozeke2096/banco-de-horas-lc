@@ -7,7 +7,8 @@ const path = require("path");
 const { createClient } = require("@supabase/supabase-js");
 const { computeSummary, aggregateSummaryByEmployee, createWorkbook, getDailyWorkloadMinutes } = require("./lib/timecard-workbook");
 const { detectPendingAlerts, summarizeAlerts, DEFAULT_ALERT_THRESHOLDS } = require("./lib/pending-alerts");
-const { startWhatsAppBot } = require("./lib/whatsapp-bot");
+const { startWhatsAppBot, getConnectionState: getWhatsAppConnectionState } = require("./lib/whatsapp-bot");
+const QRCode = require("qrcode");
 
 const LEGACY_ADMIN_NAME = "Lc tranporte";
 const SESSION_SECRET = process.env.SESSION_SECRET || "timecard-professional-secret";
@@ -2754,6 +2755,17 @@ app.post("/api/me/vehicle-transfers", requireAuth, asyncRoute(async (req, res) =
     transfer,
     context: serializeVehicleContext(nextContext),
   });
+}));
+
+// So o admin real ve isso — expor o QR de pareamento do bot pra um gestor
+// seria dar acesso pra "roubar" a sessao de WhatsApp da empresa.
+app.get("/api/admin/whatsapp/status", requireAdmin, asyncRoute(async (_req, res) => {
+  const state = getWhatsAppConnectionState();
+  if (state.status === "qr" && state.qr) {
+    const qrDataUrl = await QRCode.toDataURL(state.qr, { width: 320, margin: 1 });
+    return res.json({ status: state.status, qrDataUrl });
+  }
+  return res.json({ status: state.status, qrDataUrl: null });
 }));
 
 app.get("/api/admin/summary", requireAdminSection("overview"), asyncRoute(async (_req, res) => {
