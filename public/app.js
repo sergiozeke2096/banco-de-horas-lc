@@ -190,6 +190,7 @@ const manageEmployeeIdInput = document.querySelector("#manageEmployeeId");
 const editEmployeeNameInput = document.querySelector("#editEmployeeName");
 const editEmployeeIdInput = document.querySelector("#editEmployeeId");
 const editEmployeePhoneInput = document.querySelector("#editEmployeePhone");
+const editEmployeeDailyWorkloadHoursInput = document.querySelector("#editEmployeeDailyWorkloadHours");
 const editPermissionsGroup = document.querySelector("#editPermissionsGroup");
 const cancelEmployeeEditButton = document.querySelector("#cancelEmployeeEditButton");
 const employeePasswordForm = document.querySelector("#employeePasswordForm");
@@ -1243,6 +1244,10 @@ function renderEmployeeEditor() {
   editEmployeeIdInput.value = employee.employeeId;
   if (editEmployeePhoneInput) {
     editEmployeePhoneInput.value = employee.phone || "";
+  }
+  if (editEmployeeDailyWorkloadHoursInput) {
+    editEmployeeDailyWorkloadHoursInput.value =
+      typeof employee.dailyWorkloadMinutes === "number" ? String(employee.dailyWorkloadMinutes / 60) : "";
   }
 
   // Permissoes de um gestor so podem ser vistas/editadas pelo admin real,
@@ -2790,6 +2795,7 @@ async function handleRegister(event) {
     employeeId: document.querySelector("#registerEmployeeId").value.trim(),
     password: document.querySelector("#registerPassword").value.trim(),
     phone: document.querySelector("#registerPhone")?.value.trim() || "",
+    dailyWorkloadHours: document.querySelector("#registerDailyWorkloadHours")?.value.trim() || "",
   };
 
   if (state.user?.role === "admin" && registerRole?.value === "manager") {
@@ -3199,6 +3205,7 @@ async function handleEmployeeEditSubmit(event) {
     name: editEmployeeNameInput.value.trim(),
     employeeId: editEmployeeIdInput.value.trim(),
     phone: editEmployeePhoneInput?.value.trim() || "",
+    dailyWorkloadHours: editEmployeeDailyWorkloadHoursInput?.value.trim() || "",
   };
 
   if (editPermissionsGroup && !editPermissionsGroup.classList.contains("hidden")) {

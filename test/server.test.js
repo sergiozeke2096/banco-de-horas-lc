@@ -414,13 +414,21 @@ test("backend aceita mais de um ciclo de inicio e fim no mesmo dia", async () =>
   assert.equal(summaryResponse.body.summary[0].workedHours, "08:00");
 });
 
-test("resumo usa carga horaria de 9:18 apenas para a matricula 2", async () => {
+test("resumo respeita a carga horaria diaria configurada pelo admin pra um funcionario", async () => {
   const adminAgent = request.agent(app);
   await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
-  await registerEmployee(adminAgent, "2");
+  const employeeTwo = await registerEmployee(adminAgent, "2");
   await registerEmployee(adminAgent, "3");
   await registerVehicle(adminAgent, "ROM0002", "Veiculo matricula 2", 1000);
   await registerVehicle(adminAgent, "PAD0003", "Veiculo matricula 3", 2000);
+
+  const workloadUpdate = await adminAgent.patch(`/api/admin/employees/${employeeTwo.id}`).send({
+    name: employeeTwo.name,
+    employeeId: employeeTwo.employeeId,
+    dailyWorkloadHours: 9.3,
+  });
+  assert.equal(workloadUpdate.status, 200);
+  assert.equal(workloadUpdate.body.employee.dailyWorkloadMinutes, 558);
 
   const employeeTwoAgent = request.agent(app);
   await login(employeeTwoAgent, "2", "senha-funcionario");
@@ -483,44 +491,6 @@ test("resumo usa carga horaria de 9:18 apenas para a matricula 2", async () => {
   assert.equal(employeeThreeSummary.body.summary.length, 1);
   assert.equal(employeeThreeSummary.body.summary[0].workedHours, "08:30");
   assert.equal(employeeThreeSummary.body.summary[0].overtimeHours, "00:30");
-});
-
-test("resumo usa carga horaria de 9:18 para Everton Ricardo mesmo com outra matricula", async () => {
-  const adminAgent = request.agent(app);
-  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
-  await registerEmployee(adminAgent, "9902", "Everton Ricardo");
-  await registerVehicle(adminAgent, "EVR9902", "Veiculo Everton", 1000);
-
-  const employeeAgent = request.agent(app);
-  await login(employeeAgent, "9902", "senha-funcionario");
-  assert.equal((await employeeAgent.post("/api/me/records").send({
-    action: "Entrada",
-    recordedAt: "2026-03-11T08:00:00.000Z",
-    localDate: "11/03/2026",
-    localTime: "08:00:00",
-    vehiclePlate: "EVR9902",
-    vehicleKm: 1000,
-    ...defaultLocation,
-  })).status, 201);
-  assert.equal((await employeeAgent.post("/api/me/records").send({
-    action: "Saida",
-    recordedAt: "2026-03-11T17:18:00.000Z",
-    localDate: "11/03/2026",
-    localTime: "17:18:00",
-    vehiclePlate: "EVR9902",
-    vehicleKm: 1040,
-    ...defaultLocation,
-  })).status, 201);
-
-  const summaryResponse = await adminAgent.get("/api/admin/summary").query({
-    employeeId: "9902",
-    dateFrom: "2026-03-11",
-    dateTo: "2026-03-11",
-  });
-  assert.equal(summaryResponse.status, 200);
-  assert.equal(summaryResponse.body.summary.length, 1);
-  assert.equal(summaryResponse.body.summary[0].workedHours, "09:18");
-  assert.equal(summaryResponse.body.summary[0].overtimeHours, "00:00");
 });
 
 test("backend aceita jornada noturna cruzando meia-noite e consolida no dia de entrada", async () => {
@@ -1862,10 +1832,15 @@ test("admin recebe resumo semanal zerado ao chamar /api/me/summary", async () =>
   assert.equal(response.body.workedHours, "00:00");
 });
 
-test("resumo semanal usa carga horaria de 9:18 para a matricula 2", async () => {
+test("resumo semanal usa a carga horaria diaria configurada pelo admin", async () => {
   const adminAgent = request.agent(app);
   await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
-  await registerEmployee(adminAgent, "2");
+  const employee = await registerEmployee(adminAgent, "2");
+  await adminAgent.patch(`/api/admin/employees/${employee.id}`).send({
+    name: employee.name,
+    employeeId: employee.employeeId,
+    dailyWorkloadHours: 9.3,
+  });
 
   const employeeAgent = request.agent(app);
   await login(employeeAgent, "2", "senha-funcionario");
@@ -1873,6 +1848,19 @@ test("resumo semanal usa carga horaria de 9:18 para a matricula 2", async () => 
   const response = await employeeAgent.get("/api/me/summary");
   assert.equal(response.status, 200);
   assert.equal(response.body.dailyWorkloadMinutes, 558);
+});
+
+test("funcionario sem carga horaria configurada usa o padrao de 8h", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  await registerEmployee(adminAgent, "8801");
+
+  const employeeAgent = request.agent(app);
+  await login(employeeAgent, "8801", "senha-funcionario");
+
+  const response = await employeeAgent.get("/api/me/summary");
+  assert.equal(response.status, 200);
+  assert.equal(response.body.dailyWorkloadMinutes, 480);
 });
 
 

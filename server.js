@@ -74,6 +74,7 @@ function serializeManagedEmployee(user) {
     role: user.role,
     permissions: user.permissions || [],
     phone: user.phone || "",
+    dailyWorkloadMinutes: user.daily_workload_minutes ?? null,
     createdAt: user.created_at,
   };
 }
@@ -212,7 +213,7 @@ async function validateSupabaseSchema() {
       table: "users",
       query: supabase
         .from("users")
-        .select("id, name, employee_id, password_hash, role, permissions, phone", { head: true, count: "exact" })
+        .select("id, name, employee_id, password_hash, role, permissions, phone, daily_workload_minutes", { head: true, count: "exact" })
         .limit(1),
     },
     {
@@ -315,6 +316,23 @@ function normalizePermissionsList(value) {
   }
 
   return [...new Set(value.map((item) => String(item || "").trim()).filter((item) => ADMIN_SECTIONS.includes(item)))];
+}
+
+// Converte o valor em HORAS que o admin digita no cadastro (ex.: "12") pra
+// minutos, que e a unidade guardada no banco e usada pelo calculo de hora
+// extra em lib/timecard-workbook.js. Em branco = sem excecao (usa o padrao
+// de 8h do sistema).
+function normalizeDailyWorkloadMinutes(hoursValue) {
+  if (hoursValue === undefined || hoursValue === null || String(hoursValue).trim() === "") {
+    return { minutes: null };
+  }
+
+  const hours = Number(String(hoursValue).replace(",", "."));
+  if (Number.isNaN(hours) || hours <= 0 || hours > 24) {
+    return { error: "Carga horaria diaria deve ser um numero de horas entre 0 e 24." };
+  }
+
+  return { minutes: Math.round(hours * 60) };
 }
 
 function requireAdmin(req, res, next) {
@@ -973,7 +991,7 @@ async function getUserByPhone(phone) {
   return localUsers.find((user) => normalizePhoneNumber(user.phone) === normalizedPhone) || null;
 }
 
-async function insertEmployeeUser(name, employeeId, passwordHash, role = "employee", permissions = [], phone = null) {
+async function insertEmployeeUser(name, employeeId, passwordHash, role = "employee", permissions = [], phone = null, dailyWorkloadMinutes = null) {
   if (storageMode === "supabase") {
     return runQuery(
       supabase
@@ -985,6 +1003,7 @@ async function insertEmployeeUser(name, employeeId, passwordHash, role = "employ
           role,
           permissions,
           phone,
+          daily_workload_minutes: dailyWorkloadMinutes,
         })
         .select("*")
         .single()
@@ -999,6 +1018,7 @@ async function insertEmployeeUser(name, employeeId, passwordHash, role = "employ
     role,
     permissions,
     phone,
+    daily_workload_minutes: dailyWorkloadMinutes,
     created_at: new Date().toISOString(),
   };
   localUsers.push(user);
@@ -1024,6 +1044,30 @@ async function listEmployees(includeManagers = false) {
   return [...localUsers]
     .filter((user) => roles.includes(user.role))
     .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), "pt-BR"));
+}
+
+// Monta o Map employeeId -> minutos que lib/timecard-workbook.js recebe como
+// workloadOverridesById, pra funcionarios com jornada diferente de 8h (esse
+// modulo e puro/sem banco, entao server.js busca os valores customizados).
+async function buildWorkloadOverridesMap() {
+  const overrides = new Map();
+
+  if (storageMode === "supabase") {
+    const rows = await runQuery(
+      supabase.from("users").select("employee_id, daily_workload_minutes").not("daily_workload_minutes", "is", null)
+    );
+    for (const row of rows) {
+      overrides.set(String(row.employee_id || "").trim(), row.daily_workload_minutes);
+    }
+    return overrides;
+  }
+
+  for (const user of localUsers) {
+    if (typeof user.daily_workload_minutes === "number") {
+      overrides.set(String(user.employee_id || "").trim(), user.daily_workload_minutes);
+    }
+  }
+  return overrides;
 }
 
 async function listVehicles() {
@@ -1929,7 +1973,7 @@ app.get("/api/auth/session", (req, res) => {
 });
 
 async function createEmployeeFromRequest(req, res) {
-  const { name, employeeId, password, phone } = req.body;
+  const { name, employeeId, password, phone, dailyWorkloadHours } = req.body;
 
   if (!name || !employeeId || !password) {
     return res.status(400).json({ error: "Nome, matricula e senha sao obrigatorios." });
@@ -1939,6 +1983,11 @@ async function createEmployeeFromRequest(req, res) {
   const existingUser = await getUserByEmployeeId(cleanEmployeeId);
   if (existingUser) {
     return res.status(409).json({ error: "Ja existe um usuario com essa matricula." });
+  }
+
+  const workload = normalizeDailyWorkloadMinutes(dailyWorkloadHours);
+  if (workload.error) {
+    return res.status(400).json({ error: workload.error });
   }
 
   // So o admin real pode criar um login de gestor (com permissoes de
@@ -1953,7 +2002,7 @@ async function createEmployeeFromRequest(req, res) {
 
   const normalizedPhone = normalizePhoneNumber(phone) || null;
   const passwordHash = bcrypt.hashSync(password, 10);
-  const user = await insertEmployeeUser(name, cleanEmployeeId, passwordHash, role, permissions, normalizedPhone);
+  const user = await insertEmployeeUser(name, cleanEmployeeId, passwordHash, role, permissions, normalizedPhone, workload.minutes);
   return res.status(201).json({ user: serializeUser(user) });
 }
 
@@ -2306,6 +2355,14 @@ app.patch("/api/admin/employees/:employeeId", requireAdminSection("cadastros"), 
     updates.phone = normalizePhoneNumber(req.body.phone) || null;
   }
 
+  if (req.body.dailyWorkloadHours !== undefined) {
+    const workload = normalizeDailyWorkloadMinutes(req.body.dailyWorkloadHours);
+    if (workload.error) {
+      return res.status(400).json({ error: workload.error });
+    }
+    updates.daily_workload_minutes = workload.minutes;
+  }
+
   // Permissoes de um gestor so podem ser alteradas pelo admin real.
   if (isRealAdmin && employee.role === "manager" && req.body.permissions !== undefined) {
     updates.permissions = normalizePermissionsList(req.body.permissions);
@@ -2495,10 +2552,11 @@ app.get("/api/me/summary", requireAuth, asyncRoute(async (req, res) => {
 
   const records = (await listUserRecordsAscending(req.authUser.id)).filter(isWithinWeek);
   const transfers = (await listUserVehicleTransfersAscending(req.authUser.id)).filter(isWithinWeek);
+  const workloadOverridesById = await buildWorkloadOverridesMap();
 
   // Reaproveita o mesmo calculo de horas/carga horaria do resumo do admin
   // para os numeros nunca divergirem entre a tela do funcionario e a do admin.
-  const { employees } = aggregateSummaryByEmployee(computeSummary(records, transfers));
+  const { employees } = aggregateSummaryByEmployee(computeSummary(records, transfers, workloadOverridesById));
   const own = employees[0] || { daysWorked: 0, workedHours: "00:00", overtimeHours: "00:00" };
 
   return res.json({
@@ -2506,7 +2564,7 @@ app.get("/api/me/summary", requireAuth, asyncRoute(async (req, res) => {
     workedHours: own.workedHours,
     overtimeHours: own.overtimeHours,
     windowDays: EMPLOYEE_WEEK_SUMMARY_DAYS,
-    dailyWorkloadMinutes: getDailyWorkloadMinutes(req.authUser.employeeId, req.authUser.name),
+    dailyWorkloadMinutes: getDailyWorkloadMinutes(req.authUser.employeeId, workloadOverridesById),
   });
 }));
 
@@ -2773,12 +2831,13 @@ app.get("/api/admin/summary", requireAdminSection("overview"), asyncRoute(async 
   const baseFilters = filters.vehiclePlate ? getFiltersWithoutVehicle(filters) : filters;
   const rows = await listAllRecordsAscending(baseFilters);
   const transfers = await listAllVehicleTransfersAscending(baseFilters, { includeVehicle: false });
+  const workloadOverridesById = await buildWorkloadOverridesMap();
   const shouldUseRecentWindow = !filters.dateFrom && !filters.dateTo;
   // Calculamos com o historico completo (sem cortar por horario) para nao
   // perder a Entrada de turnos que comecam antes da janela das 48h, como
   // turnos que atravessam a madrugada. O filtro de recencia e aplicado
   // depois, em cima do resumo ja fechado de cada turno.
-  const computedSummary = computeSummary(rows, transfers);
+  const computedSummary = computeSummary(rows, transfers, workloadOverridesById);
   const recentSummary = shouldUseRecentWindow
     ? filterSummaryWithinLastHours(computedSummary, 48)
     : computedSummary;
@@ -2890,8 +2949,9 @@ app.get("/api/admin/export.xlsx", requireAdminSection("registros"), asyncRoute(a
   const baseFilters = filters.vehiclePlate ? getFiltersWithoutVehicle(filters) : filters;
   const rows = await listAllRecordsAscending(baseFilters);
   const transfers = await listAllVehicleTransfersAscending(baseFilters, { includeVehicle: false });
+  const workloadOverridesById = await buildWorkloadOverridesMap();
 
-  const workbook = createWorkbook(rows, transfers);
+  const workbook = createWorkbook(rows, transfers, workloadOverridesById);
   await sendWorkbookResponse(res, workbook, filters);
 }));
 
@@ -2911,7 +2971,8 @@ app.get("/api/admin/export.xlsx/direct", asyncRoute(async (req, res) => {
   const baseFilters = filters.vehiclePlate ? getFiltersWithoutVehicle(filters) : filters;
   const rows = await listAllRecordsAscending(baseFilters);
   const transfers = await listAllVehicleTransfersAscending(baseFilters, { includeVehicle: false });
-  const workbook = createWorkbook(rows, transfers);
+  const workloadOverridesById = await buildWorkloadOverridesMap();
+  const workbook = createWorkbook(rows, transfers, workloadOverridesById);
   await sendWorkbookResponse(res, workbook, filters);
 }));
 

@@ -6,6 +6,7 @@ create table if not exists public.users (
   role text not null check (role in ('admin', 'employee', 'manager')),
   permissions text[] not null default '{}',
   phone text,
+  daily_workload_minutes integer,
   created_at timestamptz not null default now()
 );
 
@@ -77,6 +78,7 @@ alter table public.users add constraint users_role_check check (role in ('admin'
 alter table public.users add column if not exists permissions text[] not null default '{}';
 alter table public.users add column if not exists phone text;
 create index if not exists idx_users_phone on public.users (phone);
+alter table public.users add column if not exists daily_workload_minutes integer;
 
 alter table public.time_records add column if not exists vehicle_plate text;
 alter table public.time_records add column if not exists vehicle_km double precision;
