@@ -73,16 +73,31 @@ create table if not exists public.route_stops (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.vehicle_maintenance (
+  id uuid primary key default gen_random_uuid(),
+  vehicle_id uuid not null references public.vehicles(id) on delete cascade,
+  description text not null,
+  status text not null default 'pending' check (status in ('pending', 'done')),
+  due_at text,
+  performed_at text,
+  km double precision,
+  cost double precision,
+  created_at timestamptz not null default now()
+);
+
 alter table public.users drop constraint if exists users_role_check;
 alter table public.users add constraint users_role_check check (role in ('admin', 'employee', 'manager'));
 alter table public.users add column if not exists permissions text[] not null default '{}';
 alter table public.users add column if not exists phone text;
 create index if not exists idx_users_phone on public.users (phone);
 alter table public.users add column if not exists daily_workload_minutes integer;
+alter table public.users add column if not exists requires_vehicle boolean not null default true;
+alter table public.users add column if not exists active boolean not null default true;
 
 alter table public.time_records add column if not exists vehicle_plate text;
 alter table public.time_records add column if not exists vehicle_km double precision;
 alter table public.time_records add column if not exists client_request_id text unique;
+alter table public.time_records add column if not exists photo_data text;
 alter table public.vehicles add column if not exists description text;
 alter table public.vehicles add column if not exists initial_km double precision not null default 0;
 alter table public.vehicles add column if not exists current_km double precision not null default 0;
@@ -90,6 +105,7 @@ alter table public.vehicles add column if not exists current_km double precision
 create index if not exists idx_time_records_user_id on public.time_records (user_id);
 create index if not exists idx_time_records_recorded_at on public.time_records (recorded_at desc);
 create index if not exists idx_vehicles_plate on public.vehicles (plate);
+create index if not exists idx_vehicle_maintenance_vehicle_id on public.vehicle_maintenance (vehicle_id);
 create index if not exists idx_vehicle_transfers_user_id on public.vehicle_transfers (user_id);
 create index if not exists idx_vehicle_transfers_recorded_at on public.vehicle_transfers (recorded_at desc);
 create index if not exists idx_route_stops_route_id on public.route_stops (route_id);

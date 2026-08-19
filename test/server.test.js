@@ -655,6 +655,60 @@ test("admin consegue editar funcionario e sincronizar identificacao nos registro
   assert.equal(recordsResponse.body.records[0].employee_name, "Funcionario Atualizado");
 });
 
+test("admin real consegue promover um funcionario existente a gestor com permissoes", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  const employee = await registerEmployee(adminAgent, "6101");
+
+  const promoteResponse = await adminAgent.patch(`/api/admin/employees/${employee.id}`).send({
+    name: "Funcionario Teste",
+    employeeId: "6101",
+    role: "manager",
+    permissions: ["overview", "registros"],
+  });
+  assert.equal(promoteResponse.status, 200);
+  assert.equal(promoteResponse.body.employee.role, "manager");
+  assert.deepEqual(promoteResponse.body.employee.permissions.sort(), ["overview", "registros"]);
+
+  const listResponse = await adminAgent.get("/api/admin/employees");
+  const listedEmployee = listResponse.body.employees.find((item) => item.id === employee.id);
+  assert.equal(listedEmployee.role, "manager");
+
+  const demoteResponse = await adminAgent.patch(`/api/admin/employees/${employee.id}`).send({
+    name: "Funcionario Teste",
+    employeeId: "6101",
+    role: "employee",
+  });
+  assert.equal(demoteResponse.status, 200);
+  assert.equal(demoteResponse.body.employee.role, "employee");
+  assert.deepEqual(demoteResponse.body.employee.permissions, []);
+});
+
+test("gestor sem ser admin real nao consegue promover funcionario a gestor", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  const managerUser = await registerEmployee(adminAgent, "6102", "Gestor Cadastros");
+  await adminAgent.patch(`/api/admin/employees/${managerUser.id}`).send({
+    name: "Gestor Cadastros",
+    employeeId: "6102",
+    role: "manager",
+    permissions: ["cadastros"],
+  });
+
+  const managerAgent = request.agent(app);
+  await login(managerAgent, "6102", "senha-funcionario");
+  const employee = await registerEmployee(managerAgent, "6103");
+
+  const promoteResponse = await managerAgent.patch(`/api/admin/employees/${employee.id}`).send({
+    name: "Funcionario Teste",
+    employeeId: "6103",
+    role: "manager",
+    permissions: ["overview"],
+  });
+  assert.equal(promoteResponse.status, 200);
+  assert.equal(promoteResponse.body.employee.role, "employee");
+});
+
 test("admin consegue corrigir o horario de um registro de ponto", async () => {
   const adminAgent = request.agent(app);
   await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
@@ -1039,6 +1093,56 @@ test("admin nao consegue excluir funcionario com registros", async () => {
   const deleteResponse = await adminAgent.delete(`/api/admin/employees/${employee.id}`);
   assert.equal(deleteResponse.status, 409);
   assert.match(deleteResponse.body.error, /possui registros/i);
+});
+
+test("admin consegue inativar funcionario com registros e o login passa a ser bloqueado", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  const employee = await registerEmployee(adminAgent, "9002");
+  await registerVehicle(adminAgent, "ABC1D23", "Utilitario 9002", 125430);
+
+  const employeeAgent = request.agent(app);
+  await login(employeeAgent, "9002", "senha-funcionario");
+  const recordResponse = await createRecord(employeeAgent);
+  assert.equal(recordResponse.status, 201);
+
+  const deleteResponse = await adminAgent.delete(`/api/admin/employees/${employee.id}`);
+  assert.equal(deleteResponse.status, 409);
+
+  const inactivateResponse = await adminAgent.patch(`/api/admin/employees/${employee.id}`).send({
+    name: "Funcionario Teste",
+    employeeId: "9002",
+    active: false,
+  });
+  assert.equal(inactivateResponse.status, 200);
+  assert.equal(inactivateResponse.body.employee.active, false);
+
+  const blockedLoginAgent = request.agent(app);
+  const blockedLogin = await blockedLoginAgent.post("/api/auth/login").send({
+    employeeId: "9002",
+    password: "senha-funcionario",
+  });
+  assert.equal(blockedLogin.status, 403);
+  assert.match(blockedLogin.body.error, /inativo/i);
+
+  const listResponse = await adminAgent.get("/api/admin/employees");
+  const listedEmployee = listResponse.body.employees.find((item) => item.id === employee.id);
+  assert.equal(listedEmployee.active, false);
+
+  const reactivateResponse = await adminAgent.patch(`/api/admin/employees/${employee.id}`).send({
+    name: "Funcionario Teste",
+    employeeId: "9002",
+    active: true,
+  });
+  assert.equal(reactivateResponse.status, 200);
+  assert.equal(reactivateResponse.body.employee.active, true);
+
+  const restoredLoginAgent = request.agent(app);
+  const restoredLogin = await restoredLoginAgent.post("/api/auth/login").send({
+    employeeId: "9002",
+    password: "senha-funcionario",
+  });
+  assert.equal(restoredLogin.status, 200);
 });
 
 test("admin consegue cadastrar e excluir veiculos", async () => {

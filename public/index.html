@@ -4,7 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LC Transporte | Cartao de Ponto</title>
-  <link rel="stylesheet" href="/styles.css?v=20260809-02">
+  <link rel="apple-touch-icon" href="/logo-lc.jpg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="LC Transporte">
+  <meta name="theme-color" content="#196b52">
+  <link rel="stylesheet" href="/styles.css?v=20260811-01">
 </head>
 <body>
   <img class="watermark-logo" src="/logo-lc.jpg" alt="" aria-hidden="true">
@@ -18,8 +23,7 @@
             </div>
           </div>
           <div class="auth-copy">
-            <p class="eyebrow">LC Transporte</p>
-            <h1 class="auth-title">Cartão de ponto LC</h1>
+            <h1 class="auth-title brand-title">LC Transporte</h1>
             <div class="hero-status" id="clockStatus">Carregando horario...</div>
           </div>
         </div>
@@ -80,7 +84,15 @@
           </div>
         </div>
         <div class="week-summary-card" id="weekSummaryCard">
-          <p class="week-summary-title">Essa semana</p>
+          <div class="week-summary-head">
+            <p class="week-summary-title">Essa semana</p>
+            <span class="week-summary-goal-caption" id="weekSummaryGoalCaption"></span>
+          </div>
+          <div class="week-progress-track" id="weekProgressTrack">
+            <div class="week-progress-fill" id="weekProgressFill"></div>
+            <div class="week-progress-overtime" id="weekProgressOvertime"></div>
+            <div class="week-progress-marker" id="weekProgressMarker"></div>
+          </div>
           <div class="week-summary-row">
             <div class="week-summary-item">
               <span class="week-summary-value" id="weekSummaryDays">0</span>
@@ -104,6 +116,7 @@
         </div>
         <p class="offline-cache-banner hidden" id="offlineCacheBanner"></p>
         <p class="next-action-hint" id="nextActionHint"></p>
+        <input type="file" accept="image/*" capture="user" id="punchPhotoInput" class="punch-photo-input">
         <div class="button-grid">
           <button class="primary action-button" data-action="Entrada">
             <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
@@ -128,6 +141,23 @@
           <p class="muted employee-vehicle-status hidden" id="currentVehicleStatus"></p>
           <button type="button" class="ghost employee-tool-button hidden" id="changeVehicleButton">Trocar veiculo</button>
         </div>
+        <div class="section-head">
+          <div>
+            <h3>Buscar endereco</h3>
+            <p class="muted">Pesquise a cidade para ver os enderecos cadastrados e abrir no mapa.</p>
+          </div>
+        </div>
+        <div class="admin-search-panel">
+          <label class="filter-label" for="driverAddressSearchInput">
+            Cidade
+            <input type="text" id="driverAddressSearchInput" placeholder="Ex.: Blumenau">
+          </label>
+          <div class="filter-actions">
+            <button type="button" class="secondary" id="driverAddressSearchButton">Buscar</button>
+          </div>
+        </div>
+        <p class="feedback" id="driverAddressSearchMessage"></p>
+        <div class="records" id="driverAddressResults"></div>
       </section>
 
       <section class="card hidden" id="adminPanel">
@@ -139,6 +169,7 @@
           <button type="button" class="admin-tab" data-admin-tab="registros">Registros</button>
           <button type="button" class="admin-tab" data-admin-tab="cadastros">Cadastros</button>
           <button type="button" class="admin-tab" data-admin-tab="rotas">Rotas</button>
+          <button type="button" class="admin-tab" data-admin-tab="frota">Frota</button>
         </div>
 
         <div id="adminTabOverview">
@@ -250,6 +281,7 @@
                 Carga horaria diaria (horas) — opcional
                 <input id="registerDailyWorkloadHours" type="number" min="1" max="24" step="0.5" placeholder="Ex.: 8 ou 12">
               </label>
+              <label class="checkbox-inline"><input type="checkbox" id="registerRequiresVehicle" checked> Este funcionario dirige veiculo (bate ponto com veiculo/KM)</label>
               <div class="hidden" id="registerRoleBlock">
                 <label>
                   Tipo de conta
@@ -264,6 +296,7 @@
                   <label class="checkbox-inline"><input type="checkbox" class="register-permission" value="registros"> Registros</label>
                   <label class="checkbox-inline"><input type="checkbox" class="register-permission" value="cadastros"> Cadastros</label>
                   <label class="checkbox-inline"><input type="checkbox" class="register-permission" value="rotas"> Rotas</label>
+                  <label class="checkbox-inline"><input type="checkbox" class="register-permission" value="frota"> Frota</label>
                 </div>
               </div>
               <button type="submit" class="secondary">Cadastrar funcionario</button>
@@ -382,12 +415,24 @@
                   Carga horaria diaria (horas) — opcional
                   <input id="editEmployeeDailyWorkloadHours" type="number" min="1" max="24" step="0.5" placeholder="Ex.: 8 ou 12">
                 </label>
-                <div class="hidden permission-checkbox-group" id="editPermissionsGroup">
-                  <p class="muted">Areas liberadas para este gestor</p>
-                  <label class="checkbox-inline"><input type="checkbox" class="edit-permission" value="overview"> Visao geral</label>
-                  <label class="checkbox-inline"><input type="checkbox" class="edit-permission" value="registros"> Registros</label>
-                  <label class="checkbox-inline"><input type="checkbox" class="edit-permission" value="cadastros"> Cadastros</label>
-                  <label class="checkbox-inline"><input type="checkbox" class="edit-permission" value="rotas"> Rotas</label>
+                <label class="checkbox-inline"><input type="checkbox" id="editEmployeeRequiresVehicle"> Este funcionario dirige veiculo (bate ponto com veiculo/KM)</label>
+                <label class="checkbox-inline"><input type="checkbox" id="editEmployeeActive"> Funcionario ativo (desmarque para inativar ex-funcionario sem apagar o historico)</label>
+                <div class="hidden" id="editRoleBlock">
+                  <label>
+                    Tipo de conta
+                    <select id="editEmployeeRole">
+                      <option value="employee">Funcionario (so bate ponto)</option>
+                      <option value="manager">Gestor (bate ponto + acesso a areas do painel)</option>
+                    </select>
+                  </label>
+                  <div class="hidden permission-checkbox-group" id="editPermissionsGroup">
+                    <p class="muted">Areas liberadas para este gestor</p>
+                    <label class="checkbox-inline"><input type="checkbox" class="edit-permission" value="overview"> Visao geral</label>
+                    <label class="checkbox-inline"><input type="checkbox" class="edit-permission" value="registros"> Registros</label>
+                    <label class="checkbox-inline"><input type="checkbox" class="edit-permission" value="cadastros"> Cadastros</label>
+                    <label class="checkbox-inline"><input type="checkbox" class="edit-permission" value="rotas"> Rotas</label>
+                    <label class="checkbox-inline"><input type="checkbox" class="edit-permission" value="frota"> Frota</label>
+                  </div>
                 </div>
                 <button type="submit" class="secondary">Salvar dados</button>
               </form>
@@ -399,7 +444,7 @@
                 <button type="submit" class="primary">Redefinir senha</button>
               </form>
               <div class="employee-danger-zone">
-                <p class="muted">A exclusao so e permitida para funcionarios sem registros vinculados.</p>
+                <p class="muted">A exclusao so e permitida para funcionarios sem registros vinculados. Para um ex-funcionario com historico, desmarque "Funcionario ativo" acima e salve.</p>
                 <button type="button" class="danger" id="deleteEmployeeButton">Excluir funcionario</button>
               </div>
             </section>
@@ -461,7 +506,91 @@
             </div>
           </article>
         </div>
+
+        <div class="hidden" id="adminTabFrota">
+          <article class="admin-block">
+            <div class="admin-block-head">
+              <div>
+                <h4>Manutencoes pendentes</h4>
+                <p class="muted">Todo veiculo com manutencao a fazer aparece aqui direto. So sai da lista quando voce der o "ok".</p>
+              </div>
+            </div>
+            <div class="records" id="frotaPendingOverviewResults"></div>
+          </article>
+
+          <article class="admin-block">
+            <div class="admin-block-head">
+              <div>
+                <h4>Manutencao por veiculo</h4>
+                <p class="muted">Busque um veiculo ja cadastrado para adicionar uma nova pendencia ou ver o historico do que ja foi feito.</p>
+              </div>
+            </div>
+            <div class="admin-search-panel">
+              <label class="filter-label" for="frotaVehicleSearchInput">
+                Buscar veiculo por placa
+                <input id="frotaVehicleSearchInput" type="text" list="frotaVehicleSuggestions" placeholder="Ex.: ABC1D23 ou Fiorino">
+              </label>
+              <datalist id="frotaVehicleSuggestions"></datalist>
+              <div class="filter-actions">
+                <button type="button" class="secondary" id="frotaVehicleSearchButton">Buscar veiculo</button>
+                <button type="button" class="ghost" id="frotaVehicleClearSearchButton">Limpar busca</button>
+              </div>
+            </div>
+            <p class="feedback" id="frotaVehicleSearchMessage"></p>
+            <form id="frotaMaintenanceForm" class="stack hidden">
+              <label>
+                Descricao da manutencao a fazer
+                <input id="frotaMaintenanceDescription" type="text" placeholder="Ex.: Troca de oleo e filtros" required>
+              </label>
+              <label>
+                Data prevista — opcional
+                <input id="frotaMaintenanceDueAt" type="date">
+              </label>
+              <label>
+                KM previsto — opcional
+                <input id="frotaMaintenanceKm" type="number" min="0" step="0.1" placeholder="Ex.: 125430">
+              </label>
+              <p class="feedback" id="frotaMaintenanceMessage"></p>
+              <button type="submit" class="secondary">Adicionar a fazer</button>
+            </form>
+            <div class="hidden" id="frotaMaintenanceLists">
+              <h4>A fazer</h4>
+              <div class="records" id="frotaMaintenancePendingResults"></div>
+              <div class="section-head">
+                <h4>Ja feito</h4>
+                <button type="button" class="ghost" id="frotaToggleDoneButton">Mostrar historico</button>
+              </div>
+              <div class="records hidden" id="frotaMaintenanceDoneResults"></div>
+            </div>
+          </article>
+        </div>
       </section>
+
+      <dialog class="vehicle-dialog" id="frotaCompleteDialog">
+        <form class="vehicle-form" id="frotaCompleteForm" method="dialog">
+          <div>
+            <p class="eyebrow small">Confirmar manutencao</p>
+            <h3 id="frotaCompleteTitle">Marcar manutencao como feita</h3>
+          </div>
+          <label>
+            Data em que foi feita
+            <input id="frotaCompleteDate" type="date" required>
+          </label>
+          <label>
+            KM na data do servico — opcional
+            <input id="frotaCompleteKm" type="number" min="0" step="0.1" placeholder="Ex.: 125430">
+          </label>
+          <label>
+            Custo (R$) — opcional
+            <input id="frotaCompleteCost" type="number" min="0" step="0.01" placeholder="Ex.: 450.00">
+          </label>
+          <p class="feedback vehicle-feedback" id="frotaCompleteMessage"></p>
+          <div class="dialog-actions">
+            <button type="button" class="ghost" id="frotaCompleteCancelButton">Cancelar</button>
+            <button type="submit" class="primary">Confirmar</button>
+          </div>
+        </form>
+      </dialog>
 
       <section class="card" id="recordsSection">
         <div class="section-head">
@@ -504,6 +633,9 @@
 
   <template id="recordTemplate">
     <article class="record-card">
+      <button type="button" class="record-photo-button hidden" data-open-record-photo>
+        <img class="record-photo-thumb" alt="Foto do registro de ponto">
+      </button>
       <div>
         <h4 class="record-title"></h4>
         <p class="record-meta"></p>
@@ -516,6 +648,13 @@
       </div>
     </article>
   </template>
+
+  <dialog class="photo-lightbox" id="recordPhotoLightbox">
+    <form method="dialog">
+      <img id="recordPhotoLightboxImage" alt="Foto do registro de ponto em tamanho maior">
+      <button type="submit" class="ghost photo-lightbox-close">Fechar</button>
+    </form>
+  </dialog>
 
   <dialog class="apk-update-dialog" id="apkUpdateDialog">
     <section class="apk-update-card">
@@ -535,6 +674,37 @@
         <button type="button" class="primary" id="apkUpdateButton">Atualizar agora</button>
       </div>
     </section>
+  </dialog>
+
+  <dialog class="vehicle-dialog" id="vehicleEditDialog">
+    <form class="vehicle-form" id="vehicleEditForm" method="dialog">
+      <div>
+        <p class="eyebrow small">Editar veiculo</p>
+        <h3>Atualize os dados do veiculo</h3>
+      </div>
+      <input id="vehicleEditIdInput" type="hidden">
+      <label>
+        Placa
+        <input id="vehicleEditPlateInput" type="text" maxlength="12" required>
+      </label>
+      <label>
+        Descricao
+        <input id="vehicleEditDescriptionInput" type="text">
+      </label>
+      <label>
+        KM inicial
+        <input id="vehicleEditInitialKmInput" type="number" min="0" step="0.1" required>
+      </label>
+      <label>
+        KM atual
+        <input id="vehicleEditCurrentKmInput" type="number" min="0" step="0.1">
+      </label>
+      <p class="feedback vehicle-feedback" id="vehicleEditMessage"></p>
+      <div class="dialog-actions">
+        <button type="button" class="ghost" id="vehicleEditCancelButton">Cancelar</button>
+        <button type="submit" class="primary">Salvar</button>
+      </div>
+    </form>
   </dialog>
 
   <dialog class="vehicle-dialog" id="vehicleDialog">
@@ -558,6 +728,25 @@
       <div class="dialog-actions">
         <button type="button" class="ghost" id="vehicleCancelButton">Cancelar</button>
         <button type="submit" class="primary">Salvar e registrar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="vehicle-dialog" id="punchPhotoDialog">
+    <form class="vehicle-form" id="punchPhotoForm" method="dialog">
+      <div>
+        <p class="eyebrow small">Confirmacao de identidade</p>
+        <h3>Confirme a foto do ponto</h3>
+        <p class="muted">A foto e enviada junto com o registro para confirmar quem bateu o ponto.</p>
+      </div>
+      <button type="button" class="punch-photo-preview-button" id="punchPhotoRetakeButton">
+        <img class="punch-photo-preview" id="punchPhotoPreview" alt="Foto capturada para o registro de ponto">
+      </button>
+      <p class="muted small">Toque na foto para tirar outra.</p>
+      <p class="feedback vehicle-feedback" id="punchPhotoMessage"></p>
+      <div class="dialog-actions">
+        <button type="button" class="ghost" id="punchPhotoCancelButton">Cancelar</button>
+        <button type="submit" class="primary" id="punchPhotoConfirmButton">Usar foto</button>
       </div>
     </form>
   </dialog>
@@ -749,6 +938,6 @@
     </form>
   </section>
 
-  <script src="/app.js?v=20260809-01"></script>
+  <script src="/app.js?v=20260811-01"></script>
 </body>
 </html>

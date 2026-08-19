@@ -19,8 +19,8 @@ const AUTH_DURATION_MS = 1000 * 60 * 60 * 12;
 const SIGNED_EXPORT_DURATION_MS = 1000 * 60 * 5;
 const SUPABASE_PAGE_SIZE = 1000;
 const TIME_RECORD_ACTIONS = ["Entrada", "Saida para almoco", "Retorno do almoco", "Saida"];
-const ADMIN_SECTIONS = ["overview", "registros", "cadastros", "rotas"];
-const CHAT_MODEL = "claude-opus-5";
+const ADMIN_SECTIONS = ["overview", "registros", "cadastros", "rotas", "frota"];
+const CHAT_MODEL = "claude-haiku-4-5";
 const CHAT_MAX_TURNS = 6;
 const APP_TIME_ZONE = "America/Sao_Paulo";
 const localDateFormatter = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeZone: APP_TIME_ZONE });
@@ -36,12 +36,14 @@ let localVehicles = [];
 let localVehicleTransfers = [];
 let localRoutes = [];
 let localRouteStops = [];
+let localVehicleMaintenance = [];
 let localUserSequence = 1;
 let localRecordSequence = 1;
 let localVehicleSequence = 1;
 let localVehicleTransferSequence = 1;
 let localRouteSequence = 1;
 let localRouteStopSequence = 1;
+let localVehicleMaintenanceSequence = 1;
 let initializationPromise = null;
 
 const trustProxyValue = process.env.TRUST_PROXY;
@@ -49,7 +51,9 @@ if (trustProxyValue) {
   app.set("trust proxy", /^\d+$/.test(trustProxyValue) ? Number(trustProxyValue) : trustProxyValue);
 }
 
-app.use(express.json());
+// Limite maior que o padrao (~100kb) porque o registro de ponto com foto
+// manda uma selfie em base64 dentro do corpo JSON.
+app.use(express.json({ limit: "3mb" }));
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, "public"), {
   etag: false,
@@ -66,6 +70,8 @@ function serializeUser(user) {
     employeeId: user.employee_id,
     role: user.role,
     permissions: user.permissions || [],
+    requiresVehicle: user.requires_vehicle !== false,
+    active: user.active !== false,
   };
 }
 
@@ -78,6 +84,8 @@ function serializeManagedEmployee(user) {
     permissions: user.permissions || [],
     phone: user.phone || "",
     dailyWorkloadMinutes: user.daily_workload_minutes ?? null,
+    requiresVehicle: user.requires_vehicle !== false,
+    active: user.active !== false,
     createdAt: user.created_at,
   };
 }
@@ -90,6 +98,20 @@ function serializeVehicle(vehicle) {
     initialKm: vehicle.initial_km ?? 0,
     currentKm: vehicle.current_km ?? 0,
     createdAt: vehicle.created_at,
+  };
+}
+
+function serializeVehicleMaintenance(entry) {
+  return {
+    id: entry.id,
+    vehicleId: entry.vehicle_id,
+    description: entry.description,
+    status: entry.status || "pending",
+    dueAt: entry.due_at ?? null,
+    performedAt: entry.performed_at ?? null,
+    km: entry.km ?? null,
+    cost: entry.cost ?? null,
+    createdAt: entry.created_at,
   };
 }
 
@@ -151,6 +173,14 @@ function serializeVehicleContext(context) {
 
 function isSameEntityId(left, right) {
   return String(left) === String(right);
+}
+
+// Um cookie de sessao antigo (de um periodo em que o servidor rodava em modo
+// local, com IDs numericos como "1") nao e um UUID valido no Supabase. Sem
+// essa checagem, toda requisicao com esse cookie derrubava com erro cru do
+// Postgres (22P02) em vez de simplesmente tratar a sessao como invalida.
+function looksLikeUuid(value) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
 function requireAuth(req, res, next) {
@@ -782,6 +812,12 @@ app.use(asyncRoute(async (req, _res, next) => {
     return;
   }
 
+  if (storageMode === "supabase" && !looksLikeUuid(req.authUser.id)) {
+    req.authUser = null;
+    next();
+    return;
+  }
+
   const currentUser = await getUserById(req.authUser.id);
   req.authUser = currentUser ? serializeUser(currentUser) : null;
   next();
@@ -1013,7 +1049,7 @@ async function getUserByPhone(phone) {
   return localUsers.find((user) => normalizePhoneNumber(user.phone) === normalizedPhone) || null;
 }
 
-async function insertEmployeeUser(name, employeeId, passwordHash, role = "employee", permissions = [], phone = null, dailyWorkloadMinutes = null) {
+async function insertEmployeeUser(name, employeeId, passwordHash, role = "employee", permissions = [], phone = null, dailyWorkloadMinutes = null, requiresVehicle = true) {
   if (storageMode === "supabase") {
     return runQuery(
       supabase
@@ -1026,6 +1062,8 @@ async function insertEmployeeUser(name, employeeId, passwordHash, role = "employ
           permissions,
           phone,
           daily_workload_minutes: dailyWorkloadMinutes,
+          requires_vehicle: requiresVehicle,
+          active: true,
         })
         .select("*")
         .single()
@@ -1041,6 +1079,8 @@ async function insertEmployeeUser(name, employeeId, passwordHash, role = "employ
     permissions,
     phone,
     daily_workload_minutes: dailyWorkloadMinutes,
+    requires_vehicle: requiresVehicle,
+    active: true,
     created_at: new Date().toISOString(),
   };
   localUsers.push(user);
@@ -1178,6 +1218,27 @@ async function deleteVehicle(vehicleId) {
   return localVehicles.length !== before;
 }
 
+async function updateVehicleById(vehicleId, updates) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("vehicles")
+        .update(updates)
+        .eq("id", vehicleId)
+        .select("*")
+        .maybeSingle()
+    );
+  }
+
+  const vehicle = localVehicles.find((item) => isSameEntityId(item.id, vehicleId));
+  if (!vehicle) {
+    return null;
+  }
+
+  Object.assign(vehicle, updates);
+  return vehicle;
+}
+
 async function updateVehicleCurrentKm(vehicleId, currentKm) {
   if (storageMode === "supabase") {
     return runQuery(
@@ -1228,6 +1289,111 @@ async function refreshVehicleCurrentKmByPlate(plate) {
 
   const nextCurrentKm = Math.max(...observedKms, Number(vehicle.initial_km ?? 0), 0);
   return updateVehicleCurrentKm(vehicle.id, nextCurrentKm);
+}
+
+async function listVehicleMaintenanceForVehicle(vehicleId) {
+  if (storageMode === "supabase") {
+    return listSupabaseRows(() => (
+      supabase
+        .from("vehicle_maintenance")
+        .select("*")
+        .eq("vehicle_id", vehicleId)
+        .order("created_at", { ascending: false })
+    ));
+  }
+
+  return localVehicleMaintenance
+    .filter((entry) => isSameEntityId(entry.vehicle_id, vehicleId))
+    .sort((left, right) => new Date(right.created_at) - new Date(left.created_at));
+}
+
+async function listPendingVehicleMaintenanceOverview() {
+  const [entries, vehicles] = await Promise.all([
+    storageMode === "supabase"
+      ? listSupabaseRows(() => (
+        supabase
+          .from("vehicle_maintenance")
+          .select("*")
+          .eq("status", "pending")
+          .order("created_at", { ascending: true })
+      ))
+      : localVehicleMaintenance
+        .filter((entry) => entry.status !== "done")
+        .sort((left, right) => new Date(left.created_at) - new Date(right.created_at)),
+    listVehicles(),
+  ]);
+
+  const vehiclesById = new Map(vehicles.map((vehicle) => [String(vehicle.id), vehicle]));
+  return entries.map((entry) => ({ entry, vehicle: vehiclesById.get(String(entry.vehicle_id)) || null }));
+}
+
+async function insertVehicleMaintenance(payload) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("vehicle_maintenance")
+        .insert(payload)
+        .select("*")
+        .single()
+    );
+  }
+
+  const entry = {
+    id: localVehicleMaintenanceSequence++,
+    ...payload,
+    created_at: new Date().toISOString(),
+  };
+  localVehicleMaintenance.push(entry);
+  return entry;
+}
+
+async function getVehicleMaintenanceById(entryId) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("vehicle_maintenance")
+        .select("*")
+        .eq("id", entryId)
+        .maybeSingle()
+    );
+  }
+
+  return localVehicleMaintenance.find((entry) => isSameEntityId(entry.id, entryId)) || null;
+}
+
+async function updateVehicleMaintenanceById(entryId, updates) {
+  if (storageMode === "supabase") {
+    return runQuery(
+      supabase
+        .from("vehicle_maintenance")
+        .update(updates)
+        .eq("id", entryId)
+        .select("*")
+        .maybeSingle()
+    );
+  }
+
+  const entry = localVehicleMaintenance.find((item) => isSameEntityId(item.id, entryId));
+  if (!entry) {
+    return null;
+  }
+
+  Object.assign(entry, updates);
+  return entry;
+}
+
+async function deleteVehicleMaintenanceById(entryId) {
+  if (storageMode === "supabase") {
+    const { error } = await supabase.from("vehicle_maintenance").delete().eq("id", entryId);
+    if (error) {
+      throw error;
+    }
+    return true;
+  }
+
+  const before = localVehicleMaintenance.length;
+  localVehicleMaintenance = localVehicleMaintenance.filter((entry) => !isSameEntityId(entry.id, entryId));
+  return localVehicleMaintenance.length !== before;
 }
 
 async function listAllRoutes() {
@@ -1973,12 +2139,14 @@ function resetInMemoryState() {
   localVehicleTransfers = [];
   localRoutes = [];
   localRouteStops = [];
+  localVehicleMaintenance = [];
   localUserSequence = 1;
   localRecordSequence = 1;
   localVehicleSequence = 1;
   localVehicleTransferSequence = 1;
   localRouteSequence = 1;
   localRouteStopSequence = 1;
+  localVehicleMaintenanceSequence = 1;
   initializationPromise = null;
 }
 
@@ -2024,7 +2192,10 @@ async function createEmployeeFromRequest(req, res) {
 
   const normalizedPhone = normalizePhoneNumber(phone) || null;
   const passwordHash = bcrypt.hashSync(password, 10);
-  const user = await insertEmployeeUser(name, cleanEmployeeId, passwordHash, role, permissions, normalizedPhone, workload.minutes);
+  // Funcionario administrativo (nao dirige) bate o ponto sem escolher
+  // veiculo/KM; motorista continua exigindo por padrao.
+  const requiresVehicle = req.body.requiresVehicle === undefined ? true : Boolean(req.body.requiresVehicle);
+  const user = await insertEmployeeUser(name, cleanEmployeeId, passwordHash, role, permissions, normalizedPhone, workload.minutes, requiresVehicle);
   return res.status(201).json({ user: serializeUser(user) });
 }
 
@@ -2097,6 +2268,45 @@ app.get("/api/admin/vehicles", requireAdminSection("cadastros"), asyncRoute(asyn
   return res.json({ vehicles: vehicles.map(serializeVehicle) });
 }));
 
+app.patch("/api/admin/vehicles/:vehicleId", requireAdminSection("cadastros"), asyncRoute(async (req, res) => {
+  const vehicle = await getVehicleById(req.params.vehicleId);
+  if (!vehicle) {
+    return res.status(404).json({ error: "Veiculo nao encontrado." });
+  }
+
+  const { plate, description, initialKm, currentKm } = req.body;
+  if (!plate) {
+    return res.status(400).json({ error: "Informe a placa do veiculo." });
+  }
+
+  const normalizedPlate = String(plate).trim().toUpperCase();
+  const existingVehicle = await getVehicleByPlate(normalizedPlate);
+  if (existingVehicle && String(existingVehicle.id) !== String(vehicle.id)) {
+    return res.status(409).json({ error: "Ja existe outro veiculo com essa placa." });
+  }
+
+  if (initialKm === undefined || initialKm === null || Number.isNaN(Number(initialKm)) || Number(initialKm) < 0) {
+    return res.status(400).json({ error: "Informe o KM inicial do veiculo." });
+  }
+
+  const updates = {
+    plate: normalizedPlate,
+    description: String(description || "").trim(),
+    initial_km: Number(initialKm),
+  };
+
+  if (currentKm !== undefined && currentKm !== null && String(currentKm).trim() !== "") {
+    const numericCurrentKm = Number(currentKm);
+    if (Number.isNaN(numericCurrentKm) || numericCurrentKm < 0) {
+      return res.status(400).json({ error: "KM atual invalido." });
+    }
+    updates.current_km = numericCurrentKm;
+  }
+
+  const updatedVehicle = await updateVehicleById(vehicle.id, updates);
+  return res.json({ vehicle: serializeVehicle(updatedVehicle) });
+}));
+
 app.delete("/api/admin/vehicles/:vehicleId", requireAdminSection("cadastros"), asyncRoute(async (req, res) => {
   const vehicle = await getVehicleById(req.params.vehicleId);
   if (!vehicle) {
@@ -2104,6 +2314,112 @@ app.delete("/api/admin/vehicles/:vehicleId", requireAdminSection("cadastros"), a
   }
 
   await deleteVehicle(vehicle.id);
+  return res.json({ ok: true });
+}));
+
+// Aba "Frota" do admin: historico de manutencao por veiculo cadastrado.
+// Secao propria (nao "cadastros") pra dar pra liberar so essa area pra um
+// gestor responsavel pela frota, sem dar acesso a cadastro de funcionario.
+// A lista de veiculos em si vem de GET /api/vehicles (ja liberado pra
+// qualquer usuario logado), so o historico de manutencao fica atras da
+// secao "frota".
+app.get("/api/admin/frota/vehicles/:vehicleId/maintenance", requireAdminSection("frota"), asyncRoute(async (req, res) => {
+  const vehicle = await getVehicleById(req.params.vehicleId);
+  if (!vehicle) {
+    return res.status(404).json({ error: "Veiculo nao encontrado." });
+  }
+
+  const entries = await listVehicleMaintenanceForVehicle(vehicle.id);
+  return res.json({ vehicle: serializeVehicle(vehicle), entries: entries.map(serializeVehicleMaintenance) });
+}));
+
+// Visao geral: todo veiculo com manutencao pendente aparece aqui direto,
+// sem precisar buscar por placa primeiro. So sai da lista quando o admin
+// confirma no endpoint /complete abaixo.
+app.get("/api/admin/frota/maintenance/pending", requireAdminSection("frota"), asyncRoute(async (req, res) => {
+  const overview = await listPendingVehicleMaintenanceOverview();
+  return res.json({
+    entries: overview.map(({ entry, vehicle }) => ({
+      ...serializeVehicleMaintenance(entry),
+      vehiclePlate: vehicle?.plate || null,
+      vehicleDescription: vehicle?.description || "",
+    })),
+  });
+}));
+
+// Cria sempre como pendencia ("a fazer") — so entra na lista de "ja feito"
+// quando o admin confirma no endpoint /complete abaixo.
+app.post("/api/admin/frota/vehicles/:vehicleId/maintenance", requireAdminSection("frota"), asyncRoute(async (req, res) => {
+  const vehicle = await getVehicleById(req.params.vehicleId);
+  if (!vehicle) {
+    return res.status(404).json({ error: "Veiculo nao encontrado." });
+  }
+
+  const { description, km, dueAt } = req.body;
+  const normalizedDescription = String(description || "").trim();
+  if (!normalizedDescription) {
+    return res.status(400).json({ error: "Descreva a manutencao a ser feita." });
+  }
+
+  const normalizedKm = km === undefined || km === null || String(km).trim() === "" ? null : Number(km);
+  if (normalizedKm !== null && Number.isNaN(normalizedKm)) {
+    return res.status(400).json({ error: "KM invalido." });
+  }
+
+  const normalizedDueAt = String(dueAt || "").trim() || null;
+
+  const entry = await insertVehicleMaintenance({
+    vehicle_id: vehicle.id,
+    description: normalizedDescription,
+    status: "pending",
+    due_at: normalizedDueAt,
+    performed_at: null,
+    km: normalizedKm,
+    cost: null,
+  });
+
+  return res.status(201).json({ entry: serializeVehicleMaintenance(entry) });
+}));
+
+// Admin "da o ok": move a pendencia para a lista de ja feito, preenchendo
+// data/KM/custo reais do servico.
+app.post("/api/admin/frota/maintenance/:entryId/complete", requireAdminSection("frota"), asyncRoute(async (req, res) => {
+  const entry = await getVehicleMaintenanceById(req.params.entryId);
+  if (!entry) {
+    return res.status(404).json({ error: "Registro de manutencao nao encontrado." });
+  }
+
+  const { performedAt, km, cost } = req.body;
+
+  const normalizedKm = km === undefined || km === null || String(km).trim() === "" ? entry.km ?? null : Number(km);
+  if (normalizedKm !== null && Number.isNaN(normalizedKm)) {
+    return res.status(400).json({ error: "KM invalido." });
+  }
+
+  const normalizedCost = cost === undefined || cost === null || String(cost).trim() === "" ? null : Number(cost);
+  if (normalizedCost !== null && Number.isNaN(normalizedCost)) {
+    return res.status(400).json({ error: "Custo invalido." });
+  }
+
+  const normalizedPerformedAt = String(performedAt || "").trim() || localDateFormatter.format(new Date());
+
+  const updatedEntry = await updateVehicleMaintenanceById(entry.id, {
+    status: "done",
+    performed_at: normalizedPerformedAt,
+    km: normalizedKm,
+    cost: normalizedCost,
+  });
+
+  return res.json({ entry: serializeVehicleMaintenance(updatedEntry) });
+}));
+
+app.delete("/api/admin/frota/maintenance/:entryId", requireAdminSection("frota"), asyncRoute(async (req, res) => {
+  const entry = await getVehicleMaintenanceById(req.params.entryId);
+  if (!entry) {
+    return res.status(404).json({ error: "Registro de manutencao nao encontrado." });
+  }
+
+  await deleteVehicleMaintenanceById(entry.id);
   return res.json({ ok: true });
 }));
 
@@ -2385,9 +2701,22 @@ app.patch("/api/admin/employees/:employeeId", requireAdminSection("cadastros"), 
     updates.daily_workload_minutes = workload.minutes;
   }
 
-  // Permissoes de um gestor so podem ser alteradas pelo admin real.
-  if (isRealAdmin && employee.role === "manager" && req.body.permissions !== undefined) {
+  // Trocar entre funcionario comum e gestor (e as permissoes que vem junto)
+  // so pode ser feito pelo admin real, igual ao cadastro novo.
+  if (isRealAdmin && req.body.role !== undefined) {
+    const requestedRole = String(req.body.role) === "manager" ? "manager" : "employee";
+    updates.role = requestedRole;
+    updates.permissions = requestedRole === "manager" ? normalizePermissionsList(req.body.permissions) : [];
+  } else if (isRealAdmin && employee.role === "manager" && req.body.permissions !== undefined) {
     updates.permissions = normalizePermissionsList(req.body.permissions);
+  }
+
+  if (req.body.requiresVehicle !== undefined) {
+    updates.requires_vehicle = Boolean(req.body.requiresVehicle);
+  }
+
+  if (req.body.active !== undefined) {
+    updates.active = Boolean(req.body.active);
   }
 
   const updatedEmployee = await updateEmployeeUser(employee.id, updates, allowedRoles);
@@ -2527,6 +2856,10 @@ app.post("/api/auth/login", asyncRoute(async (req, res) => {
     return res.status(401).json({ error: "Credenciais invalidas." });
   }
 
+  if (user.active === false) {
+    return res.status(403).json({ error: "Funcionario inativo. Contate o administrador." });
+  }
+
   const sessionUser = serializeUser(user);
   setAuthCookie(res, sessionUser);
   return res.json({ user: sessionUser });
@@ -2556,6 +2889,26 @@ app.get("/api/me/vehicle-context", requireAuth, asyncRoute(async (req, res) => {
 
   const context = await buildVehicleContextForUser(req.authUser.id);
   return res.json({ context: serializeVehicleContext(context) });
+}));
+
+// Busca de enderecos somente-leitura para qualquer funcionario logado (nao
+// exige a permissao de admin da secao "rotas") — usada na tela do motorista
+// para achar o endereco de uma cidade e abrir no Google Maps.
+app.get("/api/me/routes", requireAuth, asyncRoute(async (req, res) => {
+  const city = String(req.query.city || "").trim();
+  if (!city) {
+    return res.json({ city: "", stops: [] });
+  }
+
+  const cityKey = normalizeCityKey(city);
+  const [allRoutes, allStops] = await Promise.all([listAllRoutes(), listAllRouteStops()]);
+  const routeById = new Map(allRoutes.map((route) => [String(route.id), route]));
+  const matchingStops = allStops
+    .filter((stop) => normalizeCityKey(stop.city) === cityKey)
+    .map((stop) => serializeRouteStop(stop, routeById.get(String(stop.route_id))))
+    .sort((left, right) => String(left.routeName || "").localeCompare(String(right.routeName || ""), "pt-BR"));
+
+  return res.json({ city, stops: matchingStops });
 }));
 
 const EMPLOYEE_WEEK_SUMMARY_DAYS = 7;
@@ -2596,7 +2949,7 @@ app.get("/api/me/summary", requireAuth, asyncRoute(async (req, res) => {
 // Devolve { status, body } no formato pronto pra virar resposta HTTP, mas
 // quem chama nao precisa estar dentro de uma rota Express.
 async function createPunchRecord(user, payload) {
-  const { action, latitude, longitude, locationLabel, recordedAt, localDate, localTime, vehiclePlate, vehicleKm, clientRequestId } = payload;
+  const { action, latitude, longitude, locationLabel, recordedAt, localDate, localTime, vehiclePlate, vehicleKm, clientRequestId, photo } = payload;
   const allowedActions = TIME_RECORD_ACTIONS;
 
   if (!allowedActions.includes(action)) {
@@ -2605,6 +2958,16 @@ async function createPunchRecord(user, payload) {
 
   if (typeof latitude !== "number" || typeof longitude !== "number") {
     return { status: 400, body: { error: "Ative a localizacao para registrar o ponto." } };
+  }
+
+  // Foto e opcional aqui porque o bot de WhatsApp usa este mesmo caminho e
+  // nao tem como capturar camera; quem exige a foto e a tela web/app.
+  let normalizedPhoto = null;
+  if (photo !== undefined && photo !== null) {
+    if (typeof photo !== "string" || !photo.startsWith("data:image/") || photo.length > 2_000_000) {
+      return { status: 400, body: { error: "Foto invalida. Tire a foto novamente." } };
+    }
+    normalizedPhoto = photo;
   }
 
   const normalizedClientRequestId = String(clientRequestId || "").trim() || null;
@@ -2625,57 +2988,65 @@ async function createPunchRecord(user, payload) {
     return { status: 409, body: { error: sequenceError } };
   }
 
-  const vehicleContext = await buildVehicleContextForUser(user.id);
-  let normalizedVehiclePlate = String(vehiclePlate || "").trim().toUpperCase();
-  let numericVehicleKm =
-    vehicleKm === undefined || vehicleKm === null || String(vehicleKm).trim() === ""
-      ? null
-      : Number(vehicleKm);
+  // Funcionario administrativo (requiresVehicle=false) bate o ponto sem
+  // veiculo — pula toda a validacao/conflito de veiculo abaixo.
+  let normalizedVehiclePlate = null;
+  let numericVehicleKm = null;
+  let registeredVehicle = null;
 
-  if (
-    (!normalizedVehiclePlate || numericVehicleKm === null || Number.isNaN(numericVehicleKm)) &&
-    canReuseCurrentVehicleForAction(action) &&
-    vehicleContext.activeJourney &&
-    vehicleContext.currentVehicle?.plate
-  ) {
-    normalizedVehiclePlate = String(vehicleContext.currentVehicle.plate).trim().toUpperCase();
-    numericVehicleKm = Number(vehicleContext.currentVehicle.km ?? 0);
-  }
+  if (user.requiresVehicle !== false) {
+    const vehicleContext = await buildVehicleContextForUser(user.id);
+    normalizedVehiclePlate = String(vehiclePlate || "").trim().toUpperCase();
+    numericVehicleKm =
+      vehicleKm === undefined || vehicleKm === null || String(vehicleKm).trim() === ""
+        ? null
+        : Number(vehicleKm);
 
-  if (!normalizedVehiclePlate || numericVehicleKm === null || Number.isNaN(numericVehicleKm)) {
-    return { status: 400, body: { error: "Informe a placa e o KM do veiculo." } };
-  }
+    if (
+      (!normalizedVehiclePlate || numericVehicleKm === null || Number.isNaN(numericVehicleKm)) &&
+      canReuseCurrentVehicleForAction(action) &&
+      vehicleContext.activeJourney &&
+      vehicleContext.currentVehicle?.plate
+    ) {
+      normalizedVehiclePlate = String(vehicleContext.currentVehicle.plate).trim().toUpperCase();
+      numericVehicleKm = Number(vehicleContext.currentVehicle.km ?? 0);
+    }
 
-  const registeredVehicle = await getVehicleByPlate(normalizedVehiclePlate);
-  const activeAssignments = await listActiveVehicleAssignments();
-  const usageMap = buildVehicleUsageMap(activeAssignments);
+    if (!normalizedVehiclePlate || numericVehicleKm === null || Number.isNaN(numericVehicleKm)) {
+      return { status: 400, body: { error: "Informe a placa e o KM do veiculo." } };
+    }
 
-  if (!registeredVehicle) {
-    return { status: 409, body: { error: "Selecione um veiculo cadastrado." } };
-  }
+    registeredVehicle = await getVehicleByPlate(normalizedVehiclePlate);
+    const activeAssignments = await listActiveVehicleAssignments();
+    const usageMap = buildVehicleUsageMap(activeAssignments);
 
-  if (vehicleContext.activeJourney && vehicleContext.currentVehicle?.plate) {
-    if (normalizedVehiclePlate !== vehicleContext.currentVehicle.plate) {
+    if (!registeredVehicle) {
+      return { status: 409, body: { error: "Selecione um veiculo cadastrado." } };
+    }
+
+    if (vehicleContext.activeJourney && vehicleContext.currentVehicle?.plate) {
+      if (normalizedVehiclePlate !== vehicleContext.currentVehicle.plate) {
+        return {
+          status: 409,
+          body: { error: `Este funcionario esta com o veiculo ${vehicleContext.currentVehicle.plate} em uso. Use o botao Trocar veiculo para mudar.` },
+        };
+      }
+    } else {
+      const vehicleConflict = getVehicleUsageConflict(usageMap, normalizedVehiclePlate, user.id);
+      if (vehicleConflict) {
+        return {
+          status: 409,
+          body: { error: `O veiculo ${normalizedVehiclePlate} ja esta em uso por ${vehicleConflict.employeeName} (${vehicleConflict.employeeId}).` },
+        };
+      }
+    }
+
+    if (registeredVehicle && numericVehicleKm < Number(registeredVehicle.current_km ?? 0)) {
       return {
         status: 409,
-        body: { error: `Este funcionario esta com o veiculo ${vehicleContext.currentVehicle.plate} em uso. Use o botao Trocar veiculo para mudar.` },
+        body: { error: `O KM informado nao pode ser menor que o KM atual do veiculo (${registeredVehicle.current_km}).` },
       };
     }
-  } else {
-    const vehicleConflict = getVehicleUsageConflict(usageMap, normalizedVehiclePlate, user.id);
-    if (vehicleConflict) {
-      return {
-        status: 409,
-        body: { error: `O veiculo ${normalizedVehiclePlate} ja esta em uso por ${vehicleConflict.employeeName} (${vehicleConflict.employeeId}).` },
-      };
-    }
-  }
-
-  if (registeredVehicle && numericVehicleKm < Number(registeredVehicle.current_km ?? 0)) {
-    return {
-      status: 409,
-      body: { error: `O KM informado nao pode ser menor que o KM atual do veiculo (${registeredVehicle.current_km}).` },
-    };
   }
 
   const record = await insertRecord(user, {
@@ -2692,6 +3063,7 @@ async function createPunchRecord(user, payload) {
     vehicle_plate: normalizedVehiclePlate,
     vehicle_km: numericVehicleKm,
     client_request_id: normalizedClientRequestId,
+    photo_data: normalizedPhoto,
   });
 
   if (registeredVehicle) {

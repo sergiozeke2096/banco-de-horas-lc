@@ -1,12 +1,11 @@
 {
-    "apkUrl":  "/apk/lc-transporte-1.1.7.apk",
-    "publishedAt":  "2026-08-05T14:36:00.0000000Z",
-    "versionCode":  9,
-    "versionName":  "1.1.7",
+    "apkUrl":  "/apk/lc-transporte-1.1.11.apk",
+    "publishedAt":  "2026-08-10T01:14:14.0000000Z",
+    "versionCode":  13,
+    "versionName":  "1.1.11",
     "notes":  [
-                  "Fila offline: pontos batidos sem internet sao salvos e enviados sozinhos quando a conexao voltar.",
-                  "Atualizacoes do app agora baixam sozinhas em segundo plano.",
-                  "Resumo do dia continua visivel mesmo sem internet.",
-                  "Painel admin com totais por funcionario (horas, extras e KM)."
+                  "Novo: caixa de manutencoes pendentes aparece direto na aba Frota, sem precisar buscar veiculo por placa.",
+                  "Correcao: sessao antiga invalida agora e tratada normalmente em vez de mostrar erro tecnico.",
+                  "Melhorias no acesso pelo iPhone (Safari / tela de inicio)."
               ]
 }

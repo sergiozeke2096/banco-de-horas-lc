@@ -41,6 +41,13 @@ const state = {
   chatOpen: false,
   chatMessages: [],
   chatSending: false,
+  driverAddressSearchCity: "",
+  driverAddressResults: [],
+  frotaSelectedVehicleId: "",
+  frotaMaintenanceEntries: [],
+  frotaCompletingEntryId: null,
+  frotaDoneCollapsed: true,
+  frotaPendingOverview: [],
 };
 
 const APP_TIME_ZONE = "America/Sao_Paulo";
@@ -55,8 +62,12 @@ const ADMIN_SECTIONS = [
   { key: "registros", label: "Registros" },
   { key: "cadastros", label: "Cadastros" },
   { key: "rotas", label: "Rotas" },
+  { key: "frota", label: "Frota" },
 ];
 const SHOW_EMPLOYEE_KM_FIELDS = false;
+// Ponto com foto fica pronto no codigo mas inativo ate segunda ordem — troque
+// para true quando quiser reativar a exigencia de foto no registro de ponto.
+const PUNCH_PHOTO_ENABLED = false;
 
 const authPanel = document.querySelector("#authPanel");
 const appPanel = document.querySelector("#appPanel");
@@ -106,12 +117,40 @@ const weekSummaryCard = document.querySelector("#weekSummaryCard");
 const weekSummaryDays = document.querySelector("#weekSummaryDays");
 const weekSummaryWorked = document.querySelector("#weekSummaryWorked");
 const weekSummaryOvertime = document.querySelector("#weekSummaryOvertime");
+const weekSummaryGoalCaption = document.querySelector("#weekSummaryGoalCaption");
+const weekProgressFill = document.querySelector("#weekProgressFill");
+const weekProgressOvertime = document.querySelector("#weekProgressOvertime");
+const weekProgressMarker = document.querySelector("#weekProgressMarker");
 const nextActionHint = document.querySelector("#nextActionHint");
 const adminTabs = document.querySelector("#adminTabs");
 const adminTabButtons = [...document.querySelectorAll(".admin-tab")];
 const adminTabOverview = document.querySelector("#adminTabOverview");
 const adminTabCadastros = document.querySelector("#adminTabCadastros");
 const adminTabRotas = document.querySelector("#adminTabRotas");
+const adminTabFrota = document.querySelector("#adminTabFrota");
+const frotaVehicleSearchInput = document.querySelector("#frotaVehicleSearchInput");
+const frotaVehicleSuggestions = document.querySelector("#frotaVehicleSuggestions");
+const frotaVehicleSearchButton = document.querySelector("#frotaVehicleSearchButton");
+const frotaVehicleClearSearchButton = document.querySelector("#frotaVehicleClearSearchButton");
+const frotaVehicleSearchMessage = document.querySelector("#frotaVehicleSearchMessage");
+const frotaToggleDoneButton = document.querySelector("#frotaToggleDoneButton");
+const frotaMaintenanceForm = document.querySelector("#frotaMaintenanceForm");
+const frotaMaintenanceDescription = document.querySelector("#frotaMaintenanceDescription");
+const frotaMaintenanceDueAt = document.querySelector("#frotaMaintenanceDueAt");
+const frotaMaintenanceKm = document.querySelector("#frotaMaintenanceKm");
+const frotaMaintenanceMessage = document.querySelector("#frotaMaintenanceMessage");
+const frotaMaintenanceLists = document.querySelector("#frotaMaintenanceLists");
+const frotaPendingOverviewResults = document.querySelector("#frotaPendingOverviewResults");
+const frotaMaintenancePendingResults = document.querySelector("#frotaMaintenancePendingResults");
+const frotaMaintenanceDoneResults = document.querySelector("#frotaMaintenanceDoneResults");
+const frotaCompleteDialog = document.querySelector("#frotaCompleteDialog");
+const frotaCompleteForm = document.querySelector("#frotaCompleteForm");
+const frotaCompleteTitle = document.querySelector("#frotaCompleteTitle");
+const frotaCompleteDate = document.querySelector("#frotaCompleteDate");
+const frotaCompleteKm = document.querySelector("#frotaCompleteKm");
+const frotaCompleteCost = document.querySelector("#frotaCompleteCost");
+const frotaCompleteMessage = document.querySelector("#frotaCompleteMessage");
+const frotaCompleteCancelButton = document.querySelector("#frotaCompleteCancelButton");
 const adminOverviewDot = document.querySelector("#adminOverviewDot");
 const toggleRouteRegisterButton = document.querySelector("#toggleRouteRegisterButton");
 const routeRegisterForm = document.querySelector("#routeRegisterForm");
@@ -194,6 +233,10 @@ const editEmployeeNameInput = document.querySelector("#editEmployeeName");
 const editEmployeeIdInput = document.querySelector("#editEmployeeId");
 const editEmployeePhoneInput = document.querySelector("#editEmployeePhone");
 const editEmployeeDailyWorkloadHoursInput = document.querySelector("#editEmployeeDailyWorkloadHours");
+const editEmployeeRequiresVehicleInput = document.querySelector("#editEmployeeRequiresVehicle");
+const editEmployeeActiveInput = document.querySelector("#editEmployeeActive");
+const editRoleBlock = document.querySelector("#editRoleBlock");
+const editEmployeeRoleInput = document.querySelector("#editEmployeeRole");
 const editPermissionsGroup = document.querySelector("#editPermissionsGroup");
 const cancelEmployeeEditButton = document.querySelector("#cancelEmployeeEditButton");
 const employeePasswordForm = document.querySelector("#employeePasswordForm");
@@ -210,6 +253,15 @@ const vehicleSearchSuggestions = document.querySelector("#vehicleSearchSuggestio
 const searchVehicleButton = document.querySelector("#searchVehicleButton");
 const clearVehicleSearchButton = document.querySelector("#clearVehicleSearchButton");
 const vehicleAdminBody = document.querySelector("#vehicleAdminBody");
+const vehicleEditDialog = document.querySelector("#vehicleEditDialog");
+const vehicleEditForm = document.querySelector("#vehicleEditForm");
+const vehicleEditIdInput = document.querySelector("#vehicleEditIdInput");
+const vehicleEditPlateInput = document.querySelector("#vehicleEditPlateInput");
+const vehicleEditDescriptionInput = document.querySelector("#vehicleEditDescriptionInput");
+const vehicleEditInitialKmInput = document.querySelector("#vehicleEditInitialKmInput");
+const vehicleEditCurrentKmInput = document.querySelector("#vehicleEditCurrentKmInput");
+const vehicleEditMessage = document.querySelector("#vehicleEditMessage");
+const vehicleEditCancelButton = document.querySelector("#vehicleEditCancelButton");
 const vehicleDialog = document.querySelector("#vehicleDialog");
 const vehicleForm = document.querySelector("#vehicleForm");
 const vehicleSelectInput = document.querySelector("#vehicleSelectInput");
@@ -238,6 +290,19 @@ const recordEditKmInput = document.querySelector("#recordEditKmInput");
 const recordEditMessage = document.querySelector("#recordEditMessage");
 const recordEditCancelButton = document.querySelector("#recordEditCancelButton");
 const recordEditDeleteButton = document.querySelector("#recordEditDeleteButton");
+const driverAddressSearchInput = document.querySelector("#driverAddressSearchInput");
+const driverAddressSearchButton = document.querySelector("#driverAddressSearchButton");
+const driverAddressSearchMessage = document.querySelector("#driverAddressSearchMessage");
+const driverAddressResults = document.querySelector("#driverAddressResults");
+const punchPhotoInput = document.querySelector("#punchPhotoInput");
+const punchPhotoDialog = document.querySelector("#punchPhotoDialog");
+const punchPhotoForm = document.querySelector("#punchPhotoForm");
+const punchPhotoPreview = document.querySelector("#punchPhotoPreview");
+const punchPhotoMessage = document.querySelector("#punchPhotoMessage");
+const punchPhotoRetakeButton = document.querySelector("#punchPhotoRetakeButton");
+const punchPhotoCancelButton = document.querySelector("#punchPhotoCancelButton");
+const recordPhotoLightbox = document.querySelector("#recordPhotoLightbox");
+const recordPhotoLightboxImage = document.querySelector("#recordPhotoLightboxImage");
 const chatFab = document.querySelector("#chatFab");
 const chatPanel = document.querySelector("#chatPanel");
 const chatCloseButton = document.querySelector("#chatCloseButton");
@@ -249,6 +314,7 @@ const chatFeedback = document.querySelector("#chatFeedback");
 const actionButtons = [...document.querySelectorAll(".action-button")];
 let vehicleDialogResolver = null;
 let vehicleTransferDialogResolver = null;
+let punchPhotoDialogResolver = null;
 const MAX_ACTION_SLOTS = 5;
 const APK_UPDATE_STORAGE_KEY = "lc.apk_update_dismissed_version";
 const APK_UPDATE_AUTODOWNLOAD_STORAGE_KEY = "lc.apk_update_autodownloaded_version";
@@ -877,7 +943,11 @@ function renderJourneyCard() {
   }
 
   const isPunchClock = isPunchClockRole();
-  journeyCard.classList.toggle("hidden", !isPunchClock);
+  // Card de jornada agora e exclusivo do admin: motoristas e gestores nao
+  // devem mais ver esse resumo na tela de "Meu ponto", exceto a excecao
+  // aberta em hasJourneyInfoAccess().
+  const canSeeJourneyInfo = isPunchClock && hasJourneyInfoAccess();
+  journeyCard.classList.toggle("hidden", !canSeeJourneyInfo);
   if (!isPunchClock) {
     return;
   }
@@ -1024,7 +1094,12 @@ function renderRecords() {
 
     node.querySelector(".record-title").textContent = title;
     node.querySelector(".record-meta").textContent = formatters.datetime.format(new Date(record.recorded_at));
-    node.querySelector(".record-vehicle").textContent = formatVehicle(record);
+    node.querySelector(".record-vehicle").textContent = record.vehicle_plate ? formatVehicle(record) : "";
+    if (record.photo_data) {
+      const photoButton = node.querySelector("[data-open-record-photo]");
+      photoButton.querySelector("img").src = record.photo_data;
+      photoButton.classList.remove("hidden");
+    }
     if (mapsUrl) {
       const mapLink = node.querySelector(".record-map-link");
       mapLink.href = mapsUrl;
@@ -1067,10 +1142,11 @@ function renderEmployeeVehicleContext() {
   const context = state.vehicleContext;
   const availableTransferVehicles = getSelectableVehiclesForTransfer().length;
 
-  currentVehicleStatus.classList.toggle("hidden", !isPunchClock);
-  changeVehicleButton.classList.toggle("hidden", !isPunchClock);
+  const showVehicleUi = isPunchClock && userRequiresVehicle();
+  currentVehicleStatus.classList.toggle("hidden", !showVehicleUi);
+  changeVehicleButton.classList.toggle("hidden", !showVehicleUi);
 
-  if (!isPunchClock) {
+  if (!showVehicleUi) {
     return;
   }
 
@@ -1260,17 +1336,25 @@ function renderEmployeeEditor() {
     editEmployeeDailyWorkloadHoursInput.value =
       typeof employee.dailyWorkloadMinutes === "number" ? String(employee.dailyWorkloadMinutes / 60) : "";
   }
+  if (editEmployeeRequiresVehicleInput) {
+    editEmployeeRequiresVehicleInput.checked = employee.requiresVehicle !== false;
+  }
+  if (editEmployeeActiveInput) {
+    editEmployeeActiveInput.checked = employee.active !== false;
+  }
 
-  // Permissoes de um gestor so podem ser vistas/editadas pelo admin real,
-  // mesmo que um outro gestor com acesso a Cadastros tenha aberto esse editor
-  // pra um funcionario comum (que nunca tem role "manager" aqui).
-  const canEditPermissions = state.user?.role === "admin" && employee.role === "manager";
-  editPermissionsGroup?.classList.toggle("hidden", !canEditPermissions);
-  if (canEditPermissions) {
+  // Trocar o tipo de conta (funcionario <-> gestor) e ver/editar permissoes
+  // so e possivel pro admin real, mesmo que um gestor com acesso a
+  // Cadastros tenha aberto esse editor pra um funcionario comum.
+  const isRealAdmin = state.user?.role === "admin";
+  editRoleBlock?.classList.toggle("hidden", !isRealAdmin);
+  if (isRealAdmin && editEmployeeRoleInput) {
+    editEmployeeRoleInput.value = employee.role === "manager" ? "manager" : "employee";
     document.querySelectorAll(".edit-permission").forEach((input) => {
       input.checked = (employee.permissions || []).includes(input.value);
     });
   }
+  handleEditRoleChange();
   employeePasswordForm.reset();
 }
 
@@ -1327,6 +1411,9 @@ function renderManagedEmployees() {
     if (employee.id === state.managedEmployeeId) {
       row.classList.add("employee-row-active");
     }
+    if (employee.active === false) {
+      row.classList.add("employee-row-inactive");
+    }
 
     const nameCell = document.createElement("td");
     nameCell.textContent = employee.name;
@@ -1334,6 +1421,12 @@ function renderManagedEmployees() {
       const badge = document.createElement("span");
       badge.className = "manager-badge";
       badge.textContent = "Gestor";
+      nameCell.appendChild(badge);
+    }
+    if (employee.active === false) {
+      const badge = document.createElement("span");
+      badge.className = "inactive-badge";
+      badge.textContent = "Inativo";
       nameCell.appendChild(badge);
     }
 
@@ -1444,6 +1537,7 @@ function renderVehicles() {
       <td>${vehicle.currentKm ?? 0}</td>
       <td>
         <div class="employee-actions">
+          <button type="button" class="ghost table-action" data-edit-vehicle="${vehicle.id}">Editar</button>
           <button type="button" class="ghost table-action" data-delete-vehicle="${vehicle.id}">Excluir</button>
         </div>
       </td>
@@ -1778,6 +1872,16 @@ function isPunchClockRole() {
   return state.user?.role === "employee" || state.user?.role === "manager";
 }
 
+// Card de jornada e barra semana viraram info exclusiva do admin (pedido do
+// cliente). Unica excecao aberta: o motorista Sergio de Carvalho continua
+// vendo essas informacoes na propria tela de "Meu ponto".
+const JOURNEY_INFO_EXCEPTION_NAMES = ["sergio de carvalho", "sérgio de carvalho"];
+
+function hasJourneyInfoAccess() {
+  const name = String(state.user?.name || "").trim().toLowerCase();
+  return JOURNEY_INFO_EXCEPTION_NAMES.includes(name);
+}
+
 function getAllowedAdminTabKeys() {
   return ADMIN_SECTIONS.map((section) => section.key).filter((key) => hasSectionAccess(key));
 }
@@ -1834,10 +1938,16 @@ function renderAdminTabs() {
   adminTabOverview?.classList.toggle("hidden", state.adminTab !== "overview");
   adminTabCadastros?.classList.toggle("hidden", state.adminTab !== "cadastros");
   adminTabRotas?.classList.toggle("hidden", state.adminTab !== "rotas");
+  adminTabFrota?.classList.toggle("hidden", state.adminTab !== "frota");
   recordsSection?.classList.toggle("hidden", state.adminTab !== "registros");
 
   if (adminOverviewDot) {
     adminOverviewDot.classList.toggle("hidden", !state.alertCounts?.total);
+  }
+
+  if (state.adminTab === "frota") {
+    renderFrotaVehicleOptions();
+    loadFrotaPendingOverview();
   }
 }
 
@@ -1849,6 +1959,318 @@ function handleAdminTabClick(event) {
 
   state.adminTab = button.dataset.adminTab;
   renderAdminTabs();
+}
+
+function renderFrotaVehicleOptions() {
+  if (!frotaVehicleSuggestions) {
+    return;
+  }
+
+  frotaVehicleSuggestions.innerHTML = "";
+  for (const vehicle of state.vehicles) {
+    const option = document.createElement("option");
+    option.value = vehicle.description ? `${vehicle.plate} - ${vehicle.description}` : vehicle.plate;
+    frotaVehicleSuggestions.appendChild(option);
+  }
+}
+
+function renderFrotaPendingOverview() {
+  if (!frotaPendingOverviewResults) {
+    return;
+  }
+
+  const items = state.frotaPendingOverview;
+  frotaPendingOverviewResults.innerHTML = items.length
+    ? items
+        .map((entry) => {
+          const vehicleLabel = entry.vehiclePlate
+            ? entry.vehicleDescription
+              ? `${entry.vehiclePlate} - ${entry.vehicleDescription}`
+              : entry.vehiclePlate
+            : "Veiculo";
+          const dueLine = entry.dueAt ? `Previsto para: ${entry.dueAt}` : "";
+          const kmLine = entry.km !== null ? `KM previsto: ${entry.km}` : "";
+          const meta = [dueLine, kmLine].filter(Boolean).join(" | ");
+          return `
+            <article class="record-card">
+              <div>
+                <h4 class="record-title">${escapeHtml(vehicleLabel)}</h4>
+                <p>${escapeHtml(entry.description)}</p>
+                ${meta ? `<p class="muted">${escapeHtml(meta)}</p>` : ""}
+              </div>
+              <div class="record-card-aside">
+                <button type="button" class="secondary table-action" data-complete-maintenance="${entry.id}">Marcar como feito</button>
+                <button type="button" class="ghost table-action" data-delete-maintenance="${entry.id}">Excluir</button>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : '<p class="muted">Nenhuma manutencao pendente no momento.</p>';
+}
+
+async function loadFrotaPendingOverview() {
+  if (!hasSectionAccess("frota")) {
+    state.frotaPendingOverview = [];
+    renderFrotaPendingOverview();
+    return;
+  }
+
+  try {
+    const data = await api("/api/admin/frota/maintenance/pending");
+    state.frotaPendingOverview = data.entries || [];
+    renderFrotaPendingOverview();
+  } catch (error) {
+    frotaPendingOverviewResults.innerHTML = `<p class="feedback">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+async function refreshFrotaMaintenanceViews() {
+  await loadFrotaPendingOverview();
+  if (state.frotaSelectedVehicleId) {
+    await loadFrotaMaintenance();
+  }
+}
+
+function findFrotaMaintenanceEntry(entryId) {
+  return (
+    state.frotaMaintenanceEntries.find((item) => String(item.id) === String(entryId)) ||
+    state.frotaPendingOverview.find((item) => String(item.id) === String(entryId)) ||
+    null
+  );
+}
+
+async function handleFrotaPendingOverviewClick(event) {
+  const completeButton = event.target.closest("[data-complete-maintenance]");
+  if (completeButton) {
+    openFrotaCompleteDialog(completeButton.dataset.completeMaintenance);
+    return;
+  }
+
+  const deleteButton = event.target.closest("[data-delete-maintenance]");
+  if (!deleteButton) {
+    return;
+  }
+
+  try {
+    await api(`/api/admin/frota/maintenance/${deleteButton.dataset.deleteMaintenance}`, { method: "DELETE" });
+    await refreshFrotaMaintenanceViews();
+  } catch (error) {
+    frotaPendingOverviewResults.innerHTML = `<p class="feedback">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function renderFrotaMaintenance() {
+  if (!frotaMaintenancePendingResults || !frotaMaintenanceDoneResults) {
+    return;
+  }
+
+  const pending = state.frotaMaintenanceEntries.filter((entry) => entry.status !== "done");
+  const done = state.frotaMaintenanceEntries.filter((entry) => entry.status === "done");
+
+  frotaMaintenancePendingResults.innerHTML = pending.length
+    ? pending
+        .map((entry) => {
+          const dueLine = entry.dueAt ? `Previsto para: ${entry.dueAt}` : "";
+          const kmLine = entry.km !== null ? `KM previsto: ${entry.km}` : "";
+          const meta = [dueLine, kmLine].filter(Boolean).join(" | ");
+          return `
+            <article class="record-card">
+              <div>
+                <h4 class="record-title">${escapeHtml(entry.description)}</h4>
+                ${meta ? `<p class="muted">${escapeHtml(meta)}</p>` : ""}
+              </div>
+              <div class="record-card-aside">
+                <button type="button" class="secondary table-action" data-complete-maintenance="${entry.id}">Marcar como feito</button>
+                <button type="button" class="ghost table-action" data-delete-maintenance="${entry.id}">Excluir</button>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : '<p class="muted">Nenhuma manutencao pendente para este veiculo.</p>';
+
+  frotaMaintenanceDoneResults.innerHTML = done.length
+    ? done
+        .map((entry) => {
+          const kmLine = entry.km !== null ? `KM: ${entry.km}` : "";
+          const costLine = entry.cost !== null ? `Custo: R$ ${Number(entry.cost).toFixed(2)}` : "";
+          const meta = [kmLine, costLine].filter(Boolean).join(" | ");
+          return `
+            <article class="record-card">
+              <div>
+                <h4 class="record-title">${escapeHtml(entry.performedAt)} — ${escapeHtml(entry.description)}</h4>
+                ${meta ? `<p class="muted">${escapeHtml(meta)}</p>` : ""}
+              </div>
+              <div class="record-card-aside">
+                <button type="button" class="ghost table-action" data-delete-maintenance="${entry.id}">Excluir</button>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : '<p class="muted">Nenhuma manutencao concluida ainda para este veiculo.</p>';
+
+  frotaMaintenanceDoneResults.classList.toggle("hidden", state.frotaDoneCollapsed);
+  if (frotaToggleDoneButton) {
+    frotaToggleDoneButton.textContent = state.frotaDoneCollapsed ? "Mostrar historico" : "Ocultar historico";
+  }
+}
+
+function handleFrotaToggleDone() {
+  state.frotaDoneCollapsed = !state.frotaDoneCollapsed;
+  renderFrotaMaintenance();
+}
+
+async function loadFrotaMaintenance() {
+  if (!state.frotaSelectedVehicleId) {
+    return;
+  }
+
+  try {
+    const data = await api(`/api/admin/frota/vehicles/${state.frotaSelectedVehicleId}/maintenance`);
+    state.frotaMaintenanceEntries = data.entries || [];
+    renderFrotaMaintenance();
+  } catch (error) {
+    frotaMaintenanceMessage.textContent = error.message;
+  }
+}
+
+async function selectFrotaVehicle(vehicle) {
+  state.frotaSelectedVehicleId = vehicle.id;
+  state.frotaDoneCollapsed = true;
+  frotaMaintenanceForm.classList.remove("hidden");
+  frotaMaintenanceLists.classList.remove("hidden");
+  await loadFrotaMaintenance();
+}
+
+function handleFrotaVehicleSearch() {
+  const rawValue = frotaVehicleSearchInput.value.trim();
+  if (!rawValue) {
+    frotaVehicleSearchMessage.textContent = "Digite a placa do veiculo para buscar.";
+    return;
+  }
+
+  // O datalist sugere "PLACA - descricao", entao a placa e so a parte antes
+  // do primeiro " - "; se a pessoa digitar so a placa, usa o valor inteiro.
+  const candidatePlate = rawValue.split(" - ")[0].trim().toUpperCase();
+  const vehicle = state.vehicles.find((item) => String(item.plate).toUpperCase() === candidatePlate);
+
+  if (!vehicle) {
+    frotaVehicleSearchMessage.textContent = `Nenhum veiculo encontrado com a placa "${candidatePlate}".`;
+    frotaMaintenanceForm.classList.add("hidden");
+    frotaMaintenanceLists.classList.add("hidden");
+    state.frotaSelectedVehicleId = "";
+    state.frotaMaintenanceEntries = [];
+    return;
+  }
+
+  frotaVehicleSearchMessage.textContent = `Veiculo encontrado: ${vehicle.plate}${vehicle.description ? ` - ${vehicle.description}` : ""}.`;
+  selectFrotaVehicle(vehicle);
+}
+
+function handleFrotaVehicleClearSearch() {
+  frotaVehicleSearchInput.value = "";
+  frotaVehicleSearchMessage.textContent = "";
+  frotaMaintenanceForm.classList.add("hidden");
+  frotaMaintenanceLists.classList.add("hidden");
+  state.frotaSelectedVehicleId = "";
+  state.frotaMaintenanceEntries = [];
+}
+
+async function handleFrotaMaintenanceSubmit(event) {
+  event.preventDefault();
+  if (!state.frotaSelectedVehicleId) {
+    return;
+  }
+
+  const payload = {
+    description: frotaMaintenanceDescription.value.trim(),
+    dueAt: frotaMaintenanceDueAt.value,
+    km: frotaMaintenanceKm.value.trim(),
+  };
+
+  try {
+    await api(`/api/admin/frota/vehicles/${state.frotaSelectedVehicleId}/maintenance`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    frotaMaintenanceMessage.textContent = "Manutencao adicionada a lista de pendencias.";
+    frotaMaintenanceForm.reset();
+    await refreshFrotaMaintenanceViews();
+  } catch (error) {
+    frotaMaintenanceMessage.textContent = error.message;
+  }
+}
+
+function openFrotaCompleteDialog(entryId) {
+  const entry = findFrotaMaintenanceEntry(entryId);
+  if (!entry) {
+    return;
+  }
+
+  state.frotaCompletingEntryId = entryId;
+  frotaCompleteTitle.textContent = `Marcar como feito: ${entry.description}`;
+  frotaCompleteForm.reset();
+  frotaCompleteMessage.textContent = "";
+  frotaCompleteDate.value = formatters.date.format(new Date()).split("/").reverse().join("-");
+  if (entry.km !== null) {
+    frotaCompleteKm.value = entry.km;
+  }
+  frotaCompleteDialog.showModal();
+}
+
+async function handleFrotaCompleteSubmit(event) {
+  event.preventDefault();
+  const entryId = state.frotaCompletingEntryId;
+  if (!entryId) {
+    return;
+  }
+
+  const payload = {
+    performedAt: frotaCompleteDate.value,
+    km: frotaCompleteKm.value.trim(),
+    cost: frotaCompleteCost.value.trim(),
+  };
+
+  try {
+    await api(`/api/admin/frota/maintenance/${entryId}/complete`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    frotaCompleteDialog.close();
+    state.frotaCompletingEntryId = null;
+    await refreshFrotaMaintenanceViews();
+  } catch (error) {
+    frotaCompleteMessage.textContent = error.message;
+  }
+}
+
+function handleFrotaCompleteCancel() {
+  state.frotaCompletingEntryId = null;
+  if (frotaCompleteDialog.open) {
+    frotaCompleteDialog.close();
+  }
+}
+
+async function handleFrotaMaintenanceListsClick(event) {
+  const completeButton = event.target.closest("[data-complete-maintenance]");
+  if (completeButton) {
+    openFrotaCompleteDialog(completeButton.dataset.completeMaintenance);
+    return;
+  }
+
+  const deleteButton = event.target.closest("[data-delete-maintenance]");
+  if (!deleteButton) {
+    return;
+  }
+
+  try {
+    await api(`/api/admin/frota/maintenance/${deleteButton.dataset.deleteMaintenance}`, { method: "DELETE" });
+    await refreshFrotaMaintenanceViews();
+  } catch (error) {
+    frotaMaintenanceMessage.textContent = error.message;
+  }
 }
 
 function setRouteManagerMessage(message, isError = false) {
@@ -2346,6 +2768,60 @@ function renderRoutesResults() {
     .join("");
 }
 
+function createAddressMapsUrl(stop) {
+  const query = [stop.address, stop.city].filter(Boolean).join(", ");
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
+
+function renderDriverAddressResults() {
+  if (!driverAddressResults) {
+    return;
+  }
+
+  if (!state.driverAddressSearchCity) {
+    driverAddressResults.innerHTML = '<p class="muted">Busque uma cidade para ver os enderecos cadastrados.</p>';
+    return;
+  }
+
+  if (!state.driverAddressResults.length) {
+    driverAddressResults.innerHTML = `<p class="muted">Nenhum endereco cadastrado para ${escapeHtml(state.driverAddressSearchCity)}.</p>`;
+    return;
+  }
+
+  driverAddressResults.innerHTML = state.driverAddressResults
+    .map((stop) => {
+      const clientLine = stop.client ? `<h4 class="record-title">${escapeHtml(stop.client)}</h4>` : `<h4 class="record-title">${escapeHtml(stop.city)}</h4>`;
+      return `
+        <article class="record-card">
+          <div>
+            ${clientLine}
+            <p class="record-vehicle">${escapeHtml(stop.address)}</p>
+            <a class="record-map-link" href="${escapeHtml(createAddressMapsUrl(stop))}" target="_blank" rel="noopener noreferrer">Abrir no Google Maps</a>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+async function handleDriverAddressSearch() {
+  const city = driverAddressSearchInput.value.trim();
+  if (!city) {
+    driverAddressSearchMessage.textContent = "Digite uma cidade para buscar.";
+    return;
+  }
+
+  try {
+    const data = await api(`/api/me/routes${buildQueryString({ city })}`);
+    state.driverAddressSearchCity = data.city;
+    state.driverAddressResults = data.stops || [];
+    driverAddressSearchMessage.textContent = "";
+    renderDriverAddressResults();
+  } catch (error) {
+    driverAddressSearchMessage.textContent = error.message;
+  }
+}
+
 async function handleSearchRoutes() {
   const city = routeCitySearchInput.value.trim();
   if (!city) {
@@ -2398,7 +2874,6 @@ function renderRouteDriverResults() {
             <li class="route-stops-item">
               <span class="route-stops-item-text">${opBadge}${clientPart}${escapeHtml(stop.city)}, ${escapeHtml(stop.address)}${contactPart}</span>
               <div class="route-card-actions">
-                <button type="button" class="secondary table-action" data-add-route-stop="${stop.id}">Adicionar a rota</button>
                 <button type="button" class="ghost table-action" data-edit-route="${route.id}" data-edit-stop="${stop.id}">Editar</button>
               </div>
             </li>
@@ -2484,6 +2959,7 @@ function renderSession() {
   renderEmployeeVehicleContext();
   renderJourneyCard();
   renderWeekSummary();
+  renderDriverAddressResults();
   renderRecords();
   renderSummary();
   renderSummaryAggregates();
@@ -2536,6 +3012,7 @@ async function loadSession() {
       await loadAdminInsights();
       await loadRouteCities();
       await loadRouteDrivers();
+      await loadFrotaPendingOverview();
     }
 
     if (isPunchClockRole()) {
@@ -2634,13 +3111,22 @@ async function loadVehicleContext() {
   persistOfflineSnapshot();
 }
 
+function parseHoursLabelToMinutes(label) {
+  const [hours, minutes] = String(label || "00:00").split(":").map(Number);
+  return (hours || 0) * 60 + (minutes || 0);
+}
+
 function renderWeekSummary() {
   if (!weekSummaryCard || !weekSummaryDays || !weekSummaryWorked || !weekSummaryOvertime) {
     return;
   }
 
   const isPunchClock = isPunchClockRole();
-  weekSummaryCard.classList.toggle("hidden", !isPunchClock);
+  // Barra semana agora e exclusiva do admin: motoristas e gestores nao devem
+  // ver mais o progresso semanal na tela de "Meu ponto", exceto a excecao
+  // aberta em hasJourneyInfoAccess().
+  const canSeeJourneyInfo = isPunchClock && hasJourneyInfoAccess();
+  weekSummaryCard.classList.toggle("hidden", !canSeeJourneyInfo);
   if (!isPunchClock || !state.weekSummary) {
     return;
   }
@@ -2651,6 +3137,25 @@ function renderWeekSummary() {
   // A tag de hora extra do card de jornada depende da carga horaria vinda
   // aqui, entao precisa recalcular assim que o resumo da semana chega.
   renderJourneyCard();
+
+  if (weekProgressFill && weekProgressOvertime && weekProgressMarker && weekSummaryGoalCaption) {
+    const dailyWorkloadMinutes = state.weekSummary.dailyWorkloadMinutes ?? 480;
+    // Meta semanal usa 5 dias de referencia (semana util padrao) mesmo com a
+    // janela de calculo sendo os ultimos 7 dias corridos.
+    const goalMinutes = dailyWorkloadMinutes * 5;
+    const workedMinutes = parseHoursLabelToMinutes(state.weekSummary.workedHours);
+    const overtimeMinutes = parseHoursLabelToMinutes(state.weekSummary.overtimeHours);
+    const baseMinutes = Math.max(workedMinutes - overtimeMinutes, 0);
+    const scaleMax = Math.max(goalMinutes, workedMinutes, 1);
+
+    weekProgressFill.style.width = `${(baseMinutes / scaleMax) * 100}%`;
+    weekProgressOvertime.style.left = `${(baseMinutes / scaleMax) * 100}%`;
+    weekProgressOvertime.style.width = `${(overtimeMinutes / scaleMax) * 100}%`;
+    weekProgressMarker.style.left = `${Math.min((goalMinutes / scaleMax) * 100, 100)}%`;
+
+    const goalHours = Math.round(goalMinutes / 60);
+    weekSummaryGoalCaption.textContent = `${state.weekSummary.workedHours || "00:00"} de ${goalHours}h`;
+  }
 }
 
 async function loadWeekSummary() {
@@ -2741,11 +3246,19 @@ function collectVehicleInfo() {
   });
 }
 
+function userRequiresVehicle() {
+  return state.user?.requiresVehicle !== false;
+}
+
 function actionRequiresVehiclePrompt(action) {
-  return action === "Entrada" || action === "Saida";
+  return (action === "Entrada" || action === "Saida") && userRequiresVehicle();
 }
 
 function getVehicleInfoForAction(action) {
+  if (!userRequiresVehicle()) {
+    return Promise.resolve({ vehiclePlate: null, vehicleKm: null });
+  }
+
   if (actionRequiresVehiclePrompt(action)) {
     return collectVehicleInfo();
   }
@@ -2808,6 +3321,7 @@ async function handleRegister(event) {
     password: document.querySelector("#registerPassword").value.trim(),
     phone: document.querySelector("#registerPhone")?.value.trim() || "",
     dailyWorkloadHours: document.querySelector("#registerDailyWorkloadHours")?.value.trim() || "",
+    requiresVehicle: Boolean(document.querySelector("#registerRequiresVehicle")?.checked),
   };
 
   if (state.user?.role === "admin" && registerRole?.value === "manager") {
@@ -2885,6 +3399,28 @@ async function handleLogout() {
   state.routeDrivers = [];
   state.routeSearchDriver = "";
   state.routeDriverResults = [];
+  state.driverAddressSearchCity = "";
+  state.driverAddressResults = [];
+  if (driverAddressSearchInput) {
+    driverAddressSearchInput.value = "";
+  }
+  state.frotaSelectedVehicleId = "";
+  state.frotaMaintenanceEntries = [];
+  state.frotaCompletingEntryId = null;
+  state.frotaDoneCollapsed = true;
+  state.frotaPendingOverview = [];
+  if (frotaVehicleSearchInput) {
+    frotaVehicleSearchInput.value = "";
+  }
+  if (frotaVehicleSearchMessage) {
+    frotaVehicleSearchMessage.textContent = "";
+  }
+  frotaMaintenanceForm?.reset();
+  frotaMaintenanceForm?.classList.add("hidden");
+  frotaMaintenanceLists?.classList.add("hidden");
+  if (frotaCompleteDialog?.open) {
+    frotaCompleteDialog.close();
+  }
   routeStopEditDialog?.close();
   if (routeCitySearchInput) {
     routeCitySearchInput.value = "";
@@ -3155,7 +3691,56 @@ async function handleVehicleRegister(event) {
   }
 }
 
+function openVehicleEditDialog(vehicle) {
+  vehicleEditIdInput.value = vehicle.id;
+  vehicleEditPlateInput.value = vehicle.plate;
+  vehicleEditDescriptionInput.value = vehicle.description || "";
+  vehicleEditInitialKmInput.value = vehicle.initialKm ?? 0;
+  vehicleEditCurrentKmInput.value = vehicle.currentKm ?? 0;
+  vehicleEditMessage.textContent = "";
+  vehicleEditDialog.showModal();
+}
+
+async function handleVehicleEditSubmit(event) {
+  event.preventDefault();
+
+  const vehicleId = vehicleEditIdInput.value;
+  const payload = {
+    plate: vehicleEditPlateInput.value.trim(),
+    description: vehicleEditDescriptionInput.value.trim(),
+    initialKm: vehicleEditInitialKmInput.value.trim(),
+    currentKm: vehicleEditCurrentKmInput.value.trim(),
+  };
+
+  try {
+    await api(`/api/admin/vehicles/${vehicleId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+    vehicleEditDialog.close();
+    setVehicleManagerMessage(`Veiculo ${payload.plate} atualizado com sucesso.`);
+    await loadVehicles();
+  } catch (error) {
+    vehicleEditMessage.textContent = error.message;
+  }
+}
+
+function handleVehicleEditCancel() {
+  if (vehicleEditDialog.open) {
+    vehicleEditDialog.close();
+  }
+}
+
 async function handleVehicleAdminClick(event) {
+  const editButton = event.target.closest("[data-edit-vehicle]");
+  if (editButton) {
+    const vehicle = state.vehicles.find((item) => String(item.id) === editButton.dataset.editVehicle);
+    if (vehicle) {
+      openVehicleEditDialog(vehicle);
+    }
+    return;
+  }
+
   const button = event.target.closest("[data-delete-vehicle]");
   if (!button) {
     return;
@@ -3210,6 +3795,11 @@ function handleClearVehicleSearch() {
   renderVehicles();
 }
 
+function handleEditRoleChange() {
+  const isManager = editEmployeeRoleInput?.value === "manager";
+  editPermissionsGroup?.classList.toggle("hidden", editRoleBlock?.classList.contains("hidden") || !isManager);
+}
+
 async function handleEmployeeEditSubmit(event) {
   event.preventDefault();
 
@@ -3219,9 +3809,12 @@ async function handleEmployeeEditSubmit(event) {
     employeeId: editEmployeeIdInput.value.trim(),
     phone: editEmployeePhoneInput?.value.trim() || "",
     dailyWorkloadHours: editEmployeeDailyWorkloadHoursInput?.value.trim() || "",
+    requiresVehicle: Boolean(editEmployeeRequiresVehicleInput?.checked),
+    active: Boolean(editEmployeeActiveInput?.checked),
   };
 
-  if (editPermissionsGroup && !editPermissionsGroup.classList.contains("hidden")) {
+  if (editRoleBlock && !editRoleBlock.classList.contains("hidden")) {
+    payload.role = editEmployeeRoleInput?.value === "manager" ? "manager" : "employee";
     payload.permissions = [...document.querySelectorAll(".edit-permission:checked")].map((input) => input.value);
   }
 
@@ -3322,6 +3915,16 @@ function closeRecordEditDialog() {
 }
 
 function handleRecordsClick(event) {
+  const photoButton = event.target.closest("[data-open-record-photo]");
+  if (photoButton) {
+    const photoSrc = photoButton.querySelector("img")?.src;
+    if (photoSrc && recordPhotoLightbox && recordPhotoLightboxImage) {
+      recordPhotoLightboxImage.src = photoSrc;
+      recordPhotoLightbox.showModal();
+    }
+    return;
+  }
+
   const editButton = event.target.closest("[data-edit-record]");
   if (!editButton || !hasSectionAccess("registros")) {
     return;
@@ -3923,6 +4526,129 @@ function renderPendingPunchUI() {
   pendingPunchErrors.classList.remove("hidden");
 }
 
+const PUNCH_PHOTO_MAX_SIDE = 480;
+const PUNCH_PHOTO_QUALITY = 0.6;
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Nao foi possivel ler a foto."));
+    reader.readAsDataURL(file);
+  });
+}
+
+// Reduz a foto pra um JPEG pequeno antes de mandar pro servidor: uma selfie
+// direto da camera facil passa de 2-4mb, e so precisamos de uma imagem
+// pequena o suficiente pra confirmar quem bateu o ponto.
+function compressImageDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const scale = Math.min(1, PUNCH_PHOTO_MAX_SIDE / Math.max(image.width, image.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(image.width * scale);
+      canvas.height = Math.round(image.height * scale);
+      const context = canvas.getContext("2d");
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", PUNCH_PHOTO_QUALITY));
+    };
+    image.onerror = () => reject(new Error("Nao foi possivel processar a foto."));
+    image.src = dataUrl;
+  });
+}
+
+function requestPunchPhotoFile() {
+  return new Promise((resolve) => {
+    const handleChange = () => {
+      punchPhotoInput.removeEventListener("change", handleChange);
+      punchPhotoInput.removeEventListener("cancel", handleCancel);
+      const file = punchPhotoInput.files?.[0] || null;
+      punchPhotoInput.value = "";
+      resolve(file);
+    };
+    const handleCancel = () => {
+      punchPhotoInput.removeEventListener("change", handleChange);
+      punchPhotoInput.removeEventListener("cancel", handleCancel);
+      resolve(null);
+    };
+    punchPhotoInput.addEventListener("change", handleChange);
+    punchPhotoInput.addEventListener("cancel", handleCancel);
+    punchPhotoInput.click();
+  });
+}
+
+// Abre a camera, deixa o funcionario confirmar (ou tirar outra) e devolve o
+// JPEG comprimido em base64, ou null se ele cancelar o registro do ponto.
+async function capturePunchPhoto() {
+  if (!punchPhotoInput || !punchPhotoDialog) {
+    return null;
+  }
+
+  while (true) {
+    const file = await requestPunchPhotoFile();
+    if (!file) {
+      return null;
+    }
+
+    let compressed;
+    try {
+      const rawDataUrl = await readFileAsDataUrl(file);
+      compressed = await compressImageDataUrl(rawDataUrl);
+    } catch (_error) {
+      continue;
+    }
+
+    punchPhotoPreview.src = compressed;
+    punchPhotoMessage.textContent = "";
+    const outcome = await new Promise((resolve) => {
+      punchPhotoDialogResolver = resolve;
+      punchPhotoDialog.showModal();
+    });
+
+    if (outcome === "confirm") {
+      return compressed;
+    }
+    if (outcome === "cancel") {
+      return null;
+    }
+    // outcome === "retake": volta pro topo do loop e abre a camera de novo.
+  }
+}
+
+function resolvePunchPhotoDialog(outcome) {
+  const resolve = punchPhotoDialogResolver;
+  punchPhotoDialogResolver = null;
+  if (punchPhotoDialog.open) {
+    punchPhotoDialog.close();
+  }
+  if (resolve) {
+    resolve(outcome);
+  }
+}
+
+function handlePunchPhotoSubmit(event) {
+  event.preventDefault();
+  resolvePunchPhotoDialog("confirm");
+}
+
+function handlePunchPhotoRetake() {
+  resolvePunchPhotoDialog("retake");
+}
+
+function handlePunchPhotoCancel() {
+  resolvePunchPhotoDialog("cancel");
+}
+
+function handlePunchPhotoDialogClose() {
+  if (!punchPhotoDialogResolver) {
+    return;
+  }
+  const resolve = punchPhotoDialogResolver;
+  punchPhotoDialogResolver = null;
+  resolve("cancel");
+}
+
 async function registerPoint(action) {
   if (actionRequiresVehiclePrompt(action)) {
     if (!state.vehicles.length) {
@@ -3942,6 +4668,16 @@ async function registerPoint(action) {
       ? "Registro cancelado."
       : "Nao foi possivel identificar o veiculo atual. Atualize a tela e tente novamente.";
     return;
+  }
+
+  let photo = null;
+  if (PUNCH_PHOTO_ENABLED) {
+    locationStatus.textContent = "Abrindo a camera para confirmar sua identidade...";
+    photo = await capturePunchPhoto();
+    if (!photo) {
+      locationStatus.textContent = "Registro cancelado. E preciso tirar a foto para bater o ponto.";
+      return;
+    }
   }
 
   locationStatus.textContent = "Capturando horario e localizacao...";
@@ -3974,6 +4710,7 @@ async function registerPoint(action) {
     locationLabel,
     vehiclePlate: vehicleInfo.vehiclePlate,
     vehicleKm: vehicleInfo.vehicleKm,
+    photo,
   };
 
   try {
@@ -4000,6 +4737,7 @@ async function registerPoint(action) {
 bindEvent(loginForm, "submit", handleLogin);
 bindEvent(registerForm, "submit", handleRegister);
 bindEvent(registerRole, "change", handleRegisterRoleChange);
+bindEvent(editEmployeeRoleInput, "change", handleEditRoleChange);
 bindEvent(logoutButton, "click", handleLogout);
 bindEvent(toggleRegisterButton, "click", handleToggleRegisterForm);
 bindEvent(toggleVehicleRegisterButton, "click", handleToggleVehicleRegisterForm);
@@ -4025,6 +4763,9 @@ bindEvent(searchEmployeeButton, "click", handleSearchEmployees);
 bindEvent(clearEmployeeSearchButton, "click", handleClearEmployeeSearch);
 bindEvent(vehicleRegisterForm, "submit", handleVehicleRegister);
 bindEvent(vehicleAdminBody, "click", handleVehicleAdminClick);
+bindEvent(vehicleEditForm, "submit", handleVehicleEditSubmit);
+bindEvent(vehicleEditCancelButton, "click", handleVehicleEditCancel);
+bindEvent(vehicleEditDialog, "cancel", handleVehicleEditCancel);
 bindEvent(searchVehicleButton, "click", handleSearchVehicles);
 bindEvent(clearVehicleSearchButton, "click", handleClearVehicleSearch);
 bindEvent(changeVehicleButton, "click", handleChangeVehicle);
@@ -4043,6 +4784,11 @@ bindEvent(clearRouteDriverSearchButton, "click", handleClearRouteDriverSearch);
 bindEvent(routeDriverResults, "click", handleRouteResultsClick);
 bindEvent(vehicleDialog, "cancel", handleVehicleCancel);
 bindEvent(vehicleDialog, "close", handleVehicleDialogClose);
+bindEvent(punchPhotoForm, "submit", handlePunchPhotoSubmit);
+bindEvent(punchPhotoRetakeButton, "click", handlePunchPhotoRetake);
+bindEvent(punchPhotoCancelButton, "click", handlePunchPhotoCancel);
+bindEvent(punchPhotoDialog, "cancel", handlePunchPhotoCancel);
+bindEvent(punchPhotoDialog, "close", handlePunchPhotoDialogClose);
 bindEvent(vehicleTransferForm, "submit", handleVehicleTransferSubmit);
 bindEvent(nextVehicleSelectInput, "change", syncTransferVehicleKms);
 bindEvent(vehicleTransferCancelButton, "click", handleVehicleTransferCancel);
@@ -4072,6 +4818,29 @@ bindEvent(vehicleSearchInput, "keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     handleSearchVehicles();
+  }
+});
+bindEvent(frotaVehicleSearchButton, "click", handleFrotaVehicleSearch);
+bindEvent(frotaVehicleClearSearchButton, "click", handleFrotaVehicleClearSearch);
+bindEvent(frotaVehicleSearchInput, "keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    handleFrotaVehicleSearch();
+  }
+});
+bindEvent(frotaToggleDoneButton, "click", handleFrotaToggleDone);
+bindEvent(frotaMaintenanceForm, "submit", handleFrotaMaintenanceSubmit);
+bindEvent(frotaMaintenanceLists, "click", handleFrotaMaintenanceListsClick);
+bindEvent(frotaPendingOverviewResults, "click", handleFrotaPendingOverviewClick);
+bindEvent(frotaCompleteForm, "submit", handleFrotaCompleteSubmit);
+bindEvent(frotaCompleteCancelButton, "click", handleFrotaCompleteCancel);
+bindEvent(frotaCompleteDialog, "cancel", handleFrotaCompleteCancel);
+bindEvent(frotaCompleteDialog, "close", handleFrotaCompleteCancel);
+bindEvent(driverAddressSearchButton, "click", handleDriverAddressSearch);
+bindEvent(driverAddressSearchInput, "keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    handleDriverAddressSearch();
   }
 });
 actionButtons.forEach((button) => {

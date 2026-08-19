@@ -161,6 +161,15 @@ img {
   line-height: 0.96;
 }
 
+.brand-title {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  background: linear-gradient(120deg, var(--blue) 0%, var(--green) 55%, var(--gold) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 .auth-form-block {
   margin-bottom: 16px;
 }
@@ -400,6 +409,21 @@ button:disabled,
   margin-left: 6px;
 }
 
+.inactive-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #a33f33;
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  margin-left: 6px;
+}
+
+.employee-row-inactive td {
+  opacity: 0.6;
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;
@@ -502,11 +526,30 @@ button:disabled,
   background: transparent;
   position: relative;
   cursor: pointer;
+  transition: transform 0.16s ease, opacity 0.16s ease, background 0.2s ease, color 0.2s ease;
 }
 
 .admin-tab.active {
   background: var(--green);
   color: #ffffff;
+}
+
+#adminTabOverview,
+#recordsSection,
+#adminTabCadastros,
+#adminTabRotas {
+  animation: admin-tab-fade-in 0.18s ease;
+}
+
+@keyframes admin-tab-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .tab-dot {
@@ -637,13 +680,70 @@ button:disabled,
   background: var(--surface-strong);
 }
 
+.week-summary-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .week-summary-title {
-  margin: 0 0 10px;
+  margin: 0;
   font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--muted);
+}
+
+.week-summary-goal-caption {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.week-progress-track {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bg-strong);
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+
+.week-progress-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--green), var(--green-dark));
+  transition: width 0.6s ease;
+}
+
+.week-progress-overtime {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--gold), #b9812a);
+  transition: width 0.6s ease, left 0.6s ease;
+}
+
+.week-progress-marker {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  left: 100%;
+  background: var(--ink);
+  opacity: 0.32;
+  transition: left 0.6s ease;
 }
 
 .week-summary-row {
@@ -1564,6 +1664,83 @@ th {
   gap: 10px;
 }
 
+.punch-photo-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.punch-photo-preview-button {
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+  min-height: 0;
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.punch-photo-preview {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+}
+
+.record-photo-button {
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  min-height: 0;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.record-photo-thumb {
+  display: block;
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+}
+
+.photo-lightbox {
+  padding: 0;
+  border: none;
+  background: transparent;
+  max-width: min(92vw, 520px);
+}
+
+.photo-lightbox::backdrop {
+  background: rgba(18, 34, 28, 0.7);
+}
+
+.photo-lightbox form {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 20px;
+  background: var(--surface-strong);
+}
+
+.photo-lightbox img {
+  width: 100%;
+  border-radius: 14px;
+}
+
+.photo-lightbox-close {
+  justify-self: end;
+}
+
 @media (max-width: 980px) {
   .admin-filter-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1827,11 +2004,16 @@ th {
 
 .chat-fab:hover {
   background: var(--green-dark);
+  transform: translateY(-2px) scale(1.04);
 }
 
 .chat-fab.hidden,
 .chat-panel.hidden {
   display: none;
+}
+
+.chat-fab:not(.hidden) {
+  animation: chat-pop-in 0.22s ease;
 }
 
 .chat-panel {
@@ -1848,6 +2030,22 @@ th {
   flex-direction: column;
   overflow: hidden;
   z-index: 5;
+  transform-origin: bottom right;
+}
+
+.chat-panel:not(.hidden) {
+  animation: chat-pop-in 0.22s ease;
+}
+
+@keyframes chat-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 .chat-panel-head {
