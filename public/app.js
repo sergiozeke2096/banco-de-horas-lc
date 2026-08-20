@@ -242,6 +242,8 @@ const cancelEmployeeEditButton = document.querySelector("#cancelEmployeeEditButt
 const employeePasswordForm = document.querySelector("#employeePasswordForm");
 const employeePasswordInput = document.querySelector("#employeePasswordInput");
 const deleteEmployeeButton = document.querySelector("#deleteEmployeeButton");
+const wipeEmployeeZone = document.querySelector("#wipeEmployeeZone");
+const wipeEmployeeButton = document.querySelector("#wipeEmployeeButton");
 const vehicleRegisterForm = document.querySelector("#vehicleRegisterForm");
 const toggleVehicleRegisterButton = document.querySelector("#toggleVehicleRegisterButton");
 const registerVehiclePlateInput = document.querySelector("#registerVehiclePlate");
@@ -1321,10 +1323,12 @@ function renderEmployeeEditor() {
     manageEmployeeIdInput.value = "";
     employeeEditForm.reset();
     employeePasswordForm.reset();
+    wipeEmployeeZone?.classList.add("hidden");
     return;
   }
 
   employeeEditorPanel.classList.remove("hidden");
+  wipeEmployeeZone?.classList.add("hidden");
   employeeEditorTitle.textContent = `${employee.name} (${employee.employeeId})`;
   manageEmployeeIdInput.value = employee.id;
   editEmployeeNameInput.value = employee.name;
@@ -3879,6 +3883,44 @@ async function handleDeleteEmployee() {
     await loadAdminInsights();
   } catch (error) {
     setEmployeeManagerMessage(error.message, true);
+    // So o admin real pode ver a opcao de apagar o historico junto -
+    // gestor com acesso a Cadastros so ve o aviso de bloqueio normal.
+    if (/possui registros/i.test(error.message) && state.user?.role === "admin") {
+      wipeEmployeeZone?.classList.remove("hidden");
+    }
+  }
+}
+
+async function handleWipeEmployee() {
+  const employee = getManagedEmployee();
+  if (!employee) {
+    return;
+  }
+
+  const firstConfirm = window.confirm(
+    `ATENCAO: isso vai excluir ${employee.name} (${employee.employeeId}) e apagar TODOS os registros de ponto e de troca de veiculo dele para sempre. Nao da pra desfazer. Continuar?`
+  );
+  if (!firstConfirm) {
+    return;
+  }
+
+  const typedId = window.prompt(
+    `Pra confirmar, digite a matricula "${employee.employeeId}" exatamente como esta cadastrada:`
+  );
+  if (typedId !== employee.employeeId) {
+    setEmployeeManagerMessage("Matricula nao confere. Exclusao com historico cancelada.", true);
+    return;
+  }
+
+  try {
+    await api(`/api/admin/employees/${employee.id}?wipeRecords=true`, { method: "DELETE" });
+    state.managedEmployeeId = "";
+    setEmployeeManagerMessage(`Funcionario ${employee.name} e todo o historico dele foram excluidos.`);
+    await loadEmployees();
+    await loadRecords();
+    await loadAdminInsights();
+  } catch (error) {
+    setEmployeeManagerMessage(error.message, true);
   }
 }
 
@@ -4758,6 +4800,7 @@ bindEvent(employeeEditForm, "submit", handleEmployeeEditSubmit);
 bindEvent(cancelEmployeeEditButton, "click", handleCancelEmployeeEdit);
 bindEvent(employeePasswordForm, "submit", handleEmployeePasswordSubmit);
 bindEvent(deleteEmployeeButton, "click", handleDeleteEmployee);
+bindEvent(wipeEmployeeButton, "click", handleWipeEmployee);
 bindEvent(recordsList, "click", handleRecordsClick);
 bindEvent(searchEmployeeButton, "click", handleSearchEmployees);
 bindEvent(clearEmployeeSearchButton, "click", handleClearEmployeeSearch);

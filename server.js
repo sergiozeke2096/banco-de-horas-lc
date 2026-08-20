@@ -1812,6 +1812,19 @@ async function countRecordsForUser(userId) {
   return localRecords.filter((record) => record.user_id === userId).length;
 }
 
+// So chamado quando o admin real pede explicitamente pra apagar o
+// historico junto com o funcionario (acao irreversivel).
+async function deleteRecordsAndTransfersForUser(userId) {
+  if (storageMode === "supabase") {
+    await runQuery(supabase.from("time_records").delete().eq("user_id", userId));
+    await runQuery(supabase.from("vehicle_transfers").delete().eq("user_id", userId));
+    return;
+  }
+
+  localRecords = localRecords.filter((record) => record.user_id !== userId);
+  localVehicleTransfers = localVehicleTransfers.filter((transfer) => transfer.user_id !== userId);
+}
+
 async function syncRecordSnapshotForUser(userId, userSnapshot) {
   const updates = {
     employee_name: userSnapshot.name,
@@ -2744,15 +2757,25 @@ app.post("/api/admin/employees/:employeeId/password", requireAdminSection("cadas
 }));
 
 app.delete("/api/admin/employees/:employeeId", requireAdminSection("cadastros"), asyncRoute(async (req, res) => {
-  const allowedRoles = req.authUser.role === "admin" ? ["employee", "manager"] : ["employee"];
+  const isRealAdmin = req.authUser.role === "admin";
+  const allowedRoles = isRealAdmin ? ["employee", "manager"] : ["employee"];
   const employee = await requireManagedEmployee(req.params.employeeId, allowedRoles);
   if (!employee) {
     return res.status(404).json({ error: "Funcionario nao encontrado." });
   }
 
+  // Apagar o historico junto e uma acao irreversivel (perde registros de
+  // ponto e de troca de veiculo pra sempre), entao so o admin real pode
+  // pedir isso, e precisa mandar o parametro explicitamente.
+  const forceWipe = isRealAdmin && String(req.query.wipeRecords || "") === "true";
+
   const recordCount = await countRecordsForUser(employee.id);
-  if (recordCount > 0) {
+  if (recordCount > 0 && !forceWipe) {
     return res.status(409).json({ error: "Funcionario possui registros e nao pode ser excluido." });
+  }
+
+  if (forceWipe && recordCount > 0) {
+    await deleteRecordsAndTransfersForUser(employee.id);
   }
 
   await deleteEmployeeUser(employee.id, allowedRoles);

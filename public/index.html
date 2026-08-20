@@ -446,6 +446,10 @@
               <div class="employee-danger-zone">
                 <p class="muted">A exclusao so e permitida para funcionarios sem registros vinculados. Para um ex-funcionario com historico, desmarque "Funcionario ativo" acima e salve.</p>
                 <button type="button" class="danger" id="deleteEmployeeButton">Excluir funcionario</button>
+                <div class="hidden employee-wipe-zone" id="wipeEmployeeZone">
+                  <p class="muted employee-wipe-warning">Este funcionario tem registros vinculados. So o admin pode excluir e apagar o historico junto — isso remove os registros de ponto e de troca de veiculo dele para sempre, sem volta.</p>
+                  <button type="button" class="danger" id="wipeEmployeeButton">Excluir e apagar historico (sem volta)</button>
+                </div>
               </div>
             </section>
           </article>

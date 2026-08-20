@@ -1187,6 +1187,18 @@ button:disabled,
   border-top: 1px solid var(--line);
 }
 
+.employee-wipe-zone {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+
+.employee-wipe-warning {
+  color: #a33f33;
+  font-weight: 600;
+}
+
 .record-card {
   display: flex;
   justify-content: space-between;

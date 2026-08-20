@@ -1095,6 +1095,53 @@ test("admin nao consegue excluir funcionario com registros", async () => {
   assert.match(deleteResponse.body.error, /possui registros/i);
 });
 
+test("admin real consegue excluir funcionario e apagar o historico junto com wipeRecords", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  const employee = await registerEmployee(adminAgent, "9003");
+  await registerVehicle(adminAgent, "ABC1D23", "Utilitario 9003", 125430);
+
+  const employeeAgent = request.agent(app);
+  await login(employeeAgent, "9003", "senha-funcionario");
+  const recordResponse = await createRecord(employeeAgent);
+  assert.equal(recordResponse.status, 201);
+
+  const wipeResponse = await adminAgent.delete(`/api/admin/employees/${employee.id}`).query({ wipeRecords: "true" });
+  assert.equal(wipeResponse.status, 200);
+
+  const listResponse = await adminAgent.get("/api/admin/employees");
+  assert.equal(listResponse.body.employees.some((item) => item.id === employee.id), false);
+
+  const recordsResponse = await adminAgent.get("/api/me/records");
+  assert.equal(recordsResponse.body.records.some((record) => record.employee_id === "9003"), false);
+});
+
+test("gestor sem ser admin real nao consegue usar wipeRecords pra apagar historico", async () => {
+  const adminAgent = request.agent(app);
+  await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
+  const managerUser = await registerEmployee(adminAgent, "9004", "Gestor Cadastros");
+  await adminAgent.patch(`/api/admin/employees/${managerUser.id}`).send({
+    name: "Gestor Cadastros",
+    employeeId: "9004",
+    role: "manager",
+    permissions: ["cadastros"],
+  });
+
+  const managerAgent = request.agent(app);
+  await login(managerAgent, "9004", "senha-funcionario");
+  const employee = await registerEmployee(managerAgent, "9005");
+  await registerVehicle(adminAgent, "ABC1D23", "Utilitario 9005", 125430);
+
+  const employeeAgent = request.agent(app);
+  await login(employeeAgent, "9005", "senha-funcionario");
+  const recordResponse = await createRecord(employeeAgent);
+  assert.equal(recordResponse.status, 201);
+
+  const wipeResponse = await managerAgent.delete(`/api/admin/employees/${employee.id}`).query({ wipeRecords: "true" });
+  assert.equal(wipeResponse.status, 409);
+  assert.match(wipeResponse.body.error, /possui registros/i);
+});
+
 test("admin consegue inativar funcionario com registros e o login passa a ser bloqueado", async () => {
   const adminAgent = request.agent(app);
   await login(adminAgent, process.env.ADMIN_NAME, process.env.ADMIN_PASSWORD);
